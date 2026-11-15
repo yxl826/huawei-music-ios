@@ -53,6 +53,8 @@ final class PlayerEngine: ObservableObject {
     private var listenedSeconds: Double = 0
     private var hasReported = false
     private var tickCount = 0
+    private var lastTickSeconds: Double = 0
+    private var cachedArtwork: (url: String, artwork: MPMediaItemArtwork)?
     private var persistTask: Task<Void, Never>?
     private let queueStorageKey = "saved-queue-v1"
 
@@ -73,7 +75,8 @@ final class PlayerEngine: ObservableObject {
     }
 
     private func addTimeObserver() {
-        let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
+        // 0.5 秒一次：歌词高亮够用，界面重绘频率减半。
+        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             Task { @MainActor in
                 self?.handleTick(seconds: time.seconds)
@@ -348,6 +351,7 @@ final class PlayerEngine: ObservableObject {
         let generation = loadGeneration
         listenedSeconds = 0
         hasReported = false
+        lastTickSeconds = 0
         lyrics = .empty
         isFavorite = false
         isBuffering = true
@@ -419,23 +423,31 @@ final class PlayerEngine: ObservableObject {
 
     private func handleTick(seconds: Double) {
         guard seconds.isFinite, seconds >= 0 else { return }
-        position = seconds
+        let delta = seconds - lastTickSeconds
+        lastTickSeconds = seconds
+
+        // 位置只在真的变化时推送，避免定时器空转让整棵树重绘。
+        if abs(position - seconds) >= 0.05 {
+            position = seconds
+        }
         if duration <= 0, let itemDuration = player.currentItem?.duration.seconds,
            itemDuration.isFinite, itemDuration > 0 {
             duration = itemDuration
         }
         let rate = player.rate
         if isPlaying, rate == 0 {
-            isBuffering = true
-        } else if rate > 0 {
+            if !isBuffering { isBuffering = true }
+        } else if rate > 0, isBuffering {
             isBuffering = false
         }
         if rate > 0, !hasReported {
-            listenedSeconds += 0.25
+            // 用真实时间差累加：拖动进度会拿到负值，卡顿时也不会多算。
+            listenedSeconds += max(0, min(delta, 2))
             maybeReportPlayback()
         }
         tickCount += 1
-        if tickCount % 8 == 0 { updateNowPlaying() }
+        // 锁屏信息不必每两秒重写一次：MPNowPlayingInfoCenter 每次写入都会触发系统侧刷新。
+        if tickCount % 10 == 0 { updateNowPlaying() }
         if tickCount % 40 == 0 { persistQueueSoon() }
     }
 
@@ -521,6 +533,15 @@ final class PlayerEngine: ObservableObject {
         }
     }
 
+    /// 锁屏封面对象只建一次：每 5 秒重建 MPMediaItemArtwork 会白白触发系统侧刷新。
+    private func nowPlayingArtwork(for cover: String) -> MPMediaItemArtwork? {
+        if let cached = cachedArtwork, cached.url == cover { return cached.artwork }
+        guard let image = CoverCache.shared.cached(cover) else { return nil }
+        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        cachedArtwork = (cover, artwork)
+        return artwork
+    }
+
     private func updateNowPlaying() {
         guard let track = current else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
@@ -539,8 +560,8 @@ final class PlayerEngine: ObservableObject {
         if let album = track.album?.title {
             info[MPMediaItemPropertyAlbumTitle] = album
         }
-        if let cover = track.coverUrl, let image = CoverCache.shared.cached(cover) {
-            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        if let cover = track.coverUrl, let art = nowPlayingArtwork(for: cover) {
+            info[MPMediaItemPropertyArtwork] = art
         } else if let cover = track.coverUrl {
             CoverCache.shared.load(cover) { [weak self] image in
                 guard let image else { return }

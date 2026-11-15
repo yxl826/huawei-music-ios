@@ -43,14 +43,15 @@ extension View {
 
     /// 玻璃质感。iOS 26 起直接用系统的 Liquid Glass；iOS 16–18 用超薄材质 +
     /// 高光描边 + 投影近似（观感接近，但不是系统那层折射）。
-    func glass(radius: CGFloat = 22, tint: Double = 0.05) -> some View {
-        modifier(GlassSurface(radius: radius, tint: tint))
+    func glass(radius: CGFloat = 22, tint: Double = 0.05, shadow: Bool = false) -> some View {
+        modifier(GlassSurface(radius: radius, tint: tint, shadow: shadow))
     }
 }
 
 struct GlassSurface: ViewModifier {
     var radius: CGFloat = 22
     var tint: Double = 0.05
+    var shadow: Bool = false
 
     func body(content: Content) -> some View {
         #if compiler(>=6.2)
@@ -90,6 +91,8 @@ struct GlassSurface: ViewModifier {
                         lineWidth: 1
                     )
             }
-            .shadow(color: Color.black.opacity(0.35), radius: 20, y: 8)
+            .shadow(color: Color.black.opacity(shadow ? 0.42 : 0.35),
+                    radius: shadow ? 26 : 20,
+                    y: shadow ? 12 : 8)
     }
 }

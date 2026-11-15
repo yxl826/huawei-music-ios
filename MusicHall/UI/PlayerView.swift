@@ -390,8 +390,6 @@ private struct LyricsPane: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .id(index)
         .contentShape(Rectangle())
-        .scaleEffect(isActive ? 1 : 0.975, anchor: .leading)
-        .animation(.easeOut(duration: 0.24), value: isActive)
         .onTapGesture {
             if let timeMs = line.timeMs {
                 onSeek(timeMs / 1000)
@@ -411,13 +409,13 @@ private struct ArtworkBackdrop: View {
         ZStack {
             Theme.bg
             if let image {
+                // 这里放的是一张 64×64 的预模糊小图，放大后本身就是模糊的。
+                // 不再对整屏图做实时 .blur(radius: 68) —— 那是之前异常发热的主因。
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .blur(radius: 68, opaque: true)
-                    .scaleEffect(1.3)
-                    .saturation(1.4)
-                    .opacity(0.62)
+                    .saturation(1.35)
+                    .opacity(0.66)
             }
             LinearGradient(
                 stops: [
@@ -440,11 +438,7 @@ private struct ArtworkBackdrop: View {
             image = nil
             return
         }
-        if let hit = CoverCache.shared.cached(url) {
-            image = hit
-            return
-        }
-        image = await CoverCache.shared.image(for: url)
+        image = await CoverCache.shared.backdrop(for: url)
     }
 }
 

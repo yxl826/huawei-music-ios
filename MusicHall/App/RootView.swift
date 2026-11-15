@@ -13,7 +13,8 @@ struct RootView: View {
                 NavigationStack {
                     HomeView()
                 }
-                .miniPlayerInset()
+                .bottomChromeInset()
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label(AppTab.home.title, systemImage: AppTab.home.activeSymbol)
                 }
@@ -22,7 +23,8 @@ struct RootView: View {
                 NavigationStack {
                     HallView()
                 }
-                .miniPlayerInset()
+                .bottomChromeInset()
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label(AppTab.hall.title, systemImage: AppTab.hall.activeSymbol)
                 }
@@ -31,7 +33,8 @@ struct RootView: View {
                 NavigationStack {
                     SearchView()
                 }
-                .miniPlayerInset()
+                .bottomChromeInset()
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label(AppTab.search.title, systemImage: AppTab.search.symbol)
                 }
@@ -40,13 +43,16 @@ struct RootView: View {
                 NavigationStack {
                     LibraryView()
                 }
-                .miniPlayerInset()
+                .bottomChromeInset()
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label(AppTab.library.title, systemImage: AppTab.library.activeSymbol)
                 }
                 .tag(AppTab.library)
             }
             .tint(Theme.text)
+
+            BottomChrome(tab: $nav.tab)
 
             toastOverlay
         }
@@ -105,7 +111,7 @@ struct RootView: View {
                 .background(Theme.surface3, in: Capsule())
                 .overlay(Capsule().stroke(Theme.line, lineWidth: 1))
                 .padding(.horizontal, 40)
-                .padding(.bottom, 96)
+                .padding(.bottom, player.current == nil ? 86 : BottomChrome.insetHeight(hasTrack: true) + 8)
                 .transition(.opacity)
         }
     }
