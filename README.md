@@ -14,6 +14,9 @@
 - 许可：AGPL-3.0-only（见 [NOTICE](NOTICE) 与 [LICENSE](LICENSE)）
 - 最低系统：iOS 16.0
 
+**当前状态**：GitHub Actions 的 macOS 编译已通过（`CODE_SIGNING_ALLOWED=NO`），ipa 约 0.7 MB。
+真机运行与登录链路尚未实测，第一次装在 iPhone 上如果遇到问题请开 Issue 附日志。
+
 > 工程名故意叫 `MusicHall`（音乐厅），桌面图标名也是「音乐厅」，避免冒用厂商标识；
 > 界面文案里出现的「华为音乐」只用于说明它所兼容的服务。
 
@@ -64,7 +67,10 @@ git push -u origin main
 
 ### 2. 下载 ipa
 
-Actions 跑完后，进入那次运行 → 底部 **Artifacts** → 下载 `MusicHall-unsigned-ipa` → 解压得到 `MusicHall-unsigned.ipa`。
+两种方式，任选其一：
+
+- **Releases（不用登录，最省事）**：打开 [Releases](../../releases/latest)，下载 `MusicHall-unsigned.ipa`。打 `v*` 标签时 CI 会自动把 ipa 附到 Release 上。
+- **Actions Artifacts**：进那次运行 → 底部 **Artifacts** → 下载 `MusicHall-unsigned-ipa` → 解压得到 `MusicHall-unsigned.ipa`。注意 artifact 会压缩成 zip。
 
 > 这个 ipa 是**未签名**的，不能直接装。下面用你自己的 Apple ID 签。
 
