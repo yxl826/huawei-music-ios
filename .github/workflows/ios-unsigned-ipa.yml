@@ -19,6 +19,27 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 切换 Xcode（玻璃效果需要 26 及以上）
+        run: |
+          # macos-15 默认是 Xcode 16.4（Swift 6.1），编不出 Liquid Glass。
+          # 显式切到已安装的 Xcode 26.x，让 glassEffect 那条分支真的进二进制；
+          # 找不到就继续用默认版本，代码里的 #if compiler 会自动退回材质近似。
+          PICKED=""
+          for v in 26.6 26.5 26.4 26.3 26.2 26.1 26.0.1 26.0; do
+            if [ -d "/Applications/Xcode_${v}.app" ]; then PICKED="/Applications/Xcode_${v}.app"; break; fi
+          done
+          if [ -n "$PICKED" ]; then
+            sudo xcode-select -s "$PICKED"
+            echo "使用 $PICKED"
+          else
+            echo "::warning::没有找到 Xcode 26，玻璃将退回材质近似"
+          fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+          # 让构建结果可见：跑完在 check annotation 里能读到用的是哪套工具链。
+          echo "::notice::Xcode $(xcodebuild -version | head -1) / iOS SDK $(xcrun --sdk iphoneos --show-sdk-version)"
+
       - name: 显示工具链版本
         run: |
           xcodebuild -version
