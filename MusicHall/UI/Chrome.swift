@@ -86,7 +86,7 @@ struct MiniPlayerCard: View {
                 .padding(.horizontal, 1)
 
                 HStack(spacing: 10) {
-                    Cover(url: track.coverUrl, size: 42, radius: 7)
+                    Cover(url: track.coverUrl, size: 44, radius: 8)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(track.title)
                             .font(.system(size: 14, weight: .semibold))
@@ -124,7 +124,7 @@ struct MiniPlayerCard: View {
                 .padding(.bottom, 7)
             }
             .frame(height: BottomChrome.miniPlayerHeight)
-            .glass(radius: 17, tint: 0.06, shadow: true)
+            .chromeGlass(radius: 18)
             .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
             .onTapGesture { nav.showPlayer = true }
             .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -164,9 +164,9 @@ struct FloatingTabBar: View {
                 item(tab)
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 5)
         .frame(height: BottomChrome.tabBarHeight)
-        .glass(radius: BottomChrome.tabBarHeight / 2, tint: 0.05, shadow: true)
+        .chromeGlass(radius: BottomChrome.tabBarHeight / 2)
     }
 
     private func item(_ tab: AppTab) -> some View {
@@ -175,12 +175,18 @@ struct FloatingTabBar: View {
             guard selection != tab else { return }
             selection = tab
         } label: {
-            VStack(spacing: 3) {
-                Image(systemName: isSelected ? tab.activeSymbol : tab.symbol)
-                    .font(.system(size: 18, weight: .medium))
-                    .frame(height: 20)
+            VStack(spacing: 4) {
+                ZStack {
+                    // 选中项的图标底下垫一块浅色玻璃，和 iOS 26 的选中态一致。
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(isSelected ? Theme.like.opacity(0.16) : Color.clear)
+                        .frame(width: 46, height: 27)
+                    Image(systemName: isSelected ? tab.activeSymbol : tab.symbol)
+                        .font(.system(size: 19, weight: .medium))
+                }
+                .frame(height: 27)
                 Text(tab.title)
-                    .font(.system(size: 9.5, weight: isSelected ? .semibold : .medium))
+                    .font(.system(size: 10, weight: isSelected ? .semibold : .medium))
             }
             .foregroundStyle(isSelected ? Theme.like : Color.white.opacity(0.55))
             .frame(maxWidth: .infinity)

@@ -46,6 +46,60 @@ extension View {
     func glass(radius: CGFloat = 22, tint: Double = 0.05, shadow: Bool = false) -> some View {
         modifier(GlassSurface(radius: radius, tint: tint, shadow: shadow))
     }
+
+    /// 底部悬浮层专用：比普通玻璃更「实」一点。
+    /// 内容（封面、文字）从下面滚过时不会糊成一片，这是 Apple Music 底部条的观感。
+    func chromeGlass(radius: CGFloat = 22) -> some View {
+        modifier(ChromeGlass(radius: radius))
+    }
+}
+
+struct ChromeGlass: ViewModifier {
+    var radius: CGFloat
+
+    func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            content.glassEffect(
+                .regular.tint(Color.black.opacity(0.22)),
+                in: RoundedRectangle(cornerRadius: radius, style: .continuous)
+            )
+        } else {
+            fallback(content)
+        }
+        #else
+        fallback(content)
+        #endif
+    }
+
+    @ViewBuilder
+    private func fallback(_ content: Content) -> some View {
+        content
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(Color(hex: 0x131317).opacity(0.82))
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.26),
+                                Color.white.opacity(0.04),
+                                Color.white.opacity(0.14)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            .shadow(color: Color.black.opacity(0.45), radius: 24, y: 10)
+    }
 }
 
 struct GlassSurface: ViewModifier {

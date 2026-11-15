@@ -1,11 +1,13 @@
 import SwiftUI
 import UIKit
 
-/// 播放页：Apple Music 那种「歌词当主角」的版式。
+/// 播放页：按 Apple Music 的「正在播放」版式重做。
 ///
-/// 背景是封面重模糊 + 三层渐变压暗，顶栏和底部控制条用玻璃材质
-/// （iOS 26 起走系统 Liquid Glass，更早的系统用超薄材质近似）；
-/// 歌词左对齐、当前行加粗放大、点行跳转、随播放自动居中。
+/// 结构自上而下：抓手 + 顶部信息条（封面缩略图 / 歌名歌手 / 收藏 / 收起）
+/// → 歌词（或大封面）→ 进度与时间 → 上一首 / 播放 / 下一首 → 底部三个功能图标。
+///
+/// 宽度全部由窗口宽度显式给出：歌词内容再长也不能把页面撑宽，
+/// 否则整页会被居中裁切、顶栏按钮被挤到屏幕外（1.2.0 那个「进得去出不来」就是这个问题）。
 struct PlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var player: PlayerEngine
@@ -14,36 +16,33 @@ struct PlayerView: View {
     @State private var page: Page = .lyrics
     @State private var dragOffset: CGFloat = 0
 
+    private let sidePadding: CGFloat = 20
+
     enum Page {
         case lyrics
         case cover
     }
 
     var body: some View {
-        ZStack {
-            ArtworkBackdrop(url: player.current?.coverUrl)
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            ZStack {
+                ArtworkBackdrop(url: player.current?.coverUrl)
 
-            if let track = player.current {
-                VStack(spacing: 0) {
-                    topBar(track)
-                    pageBody(track)
-                    transport
+                if let track = player.current {
+                    content(track, width: width)
+                } else {
+                    EmptyHint(
+                        title: "还没有在播放的歌",
+                        detail: "从收藏、歌单或搜索里点一首开始。",
+                        systemImage: "play.circle"
+                    )
+                    .padding(.horizontal, 30)
                 }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 4)
-            } else {
-                EmptyHint(
-                    title: "还没有在播放的歌",
-                    detail: "从收藏、歌单或搜索里点一首开始。",
-                    systemImage: "play.circle"
-                )
-                .padding(.horizontal, 30)
             }
+            .frame(width: width, height: geometry.size.height)
+            .clipped()
         }
-        // 页面宽度必须钉死在屏幕上：任何一行超长歌词一旦把内容撑宽，
-        // 外层的顶栏 HStack 也会跟着变宽，左右两个玻璃圆钮就被顶出屏幕（表现为「退不出去」）。
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
         .preferredColorScheme(.dark)
         .offset(y: dragOffset)
         .sheet(isPresented: $nav.showQueue) {
@@ -51,58 +50,107 @@ struct PlayerView: View {
         }
     }
 
-    // MARK: - 顶栏
+    // MARK: - 整体
 
-    private func topBar(_ track: Track) -> some View {
-        HStack(spacing: 10) {
-            GlassCircleButton(systemName: "chevron.down") {
-                dismiss()
-            }
+    private func content(_ track: Track, width: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            grabber
+                .padding(.top, 4)
 
-            Spacer(minLength: 8)
+            header(track)
+                .padding(.top, 12)
 
-            VStack(spacing: 2) {
-                Text(track.title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.9))
-                    .lineLimit(1)
-                Text(qualityLine(track))
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.45))
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: 190)
+            pageBody(track, width: max(0, width - sidePadding * 2))
+                .frame(maxHeight: .infinity)
 
-            Spacer(minLength: 8)
+            progressBlock
+                .padding(.top, 6)
 
-            GlassCircleButton(systemName: page == .lyrics ? "music.note" : "quote.bubble") {
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                    page = (page == .lyrics ? .cover : .lyrics)
-                }
-            }
+            transportRow
+                .padding(.top, 14)
 
-            GlassCircleButton(systemName: "list.bullet") {
-                nav.showQueue = true
-            }
+            bottomRow
+                .padding(.top, 14)
+                .padding(.bottom, 10)
         }
-        .padding(.top, 2)
-        .padding(.bottom, 8)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 16)
-                .onChanged { value in
-                    dragOffset = max(0, value.translation.height * 0.6)
-                }
-                .onEnded { value in
-                    if value.translation.height > 90 {
-                        dismiss()
-                    } else {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-                            dragOffset = 0
-                        }
+        .padding(.horizontal, sidePadding)
+        .frame(width: width)
+    }
+
+    private var grabber: some View {
+        Capsule()
+            .fill(Color.white.opacity(0.28))
+            .frame(width: 36, height: 5)
+    }
+
+    /// 只在抓手与信息条上识别下拉，避免和歌词滚动、进度拖动抢手势。
+    private var dismissGesture: some Gesture {
+        DragGesture(minimumDistance: 14)
+            .onChanged { value in
+                guard value.translation.height > 0 else { return }
+                dragOffset = value.translation.height * 0.6
+            }
+            .onEnded { value in
+                if value.translation.height > 90 {
+                    dismiss()
+                } else {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+                        dragOffset = 0
                     }
                 }
-        )
+            }
+    }
+
+    // MARK: - 顶部信息条
+
+    private func header(_ track: Track) -> some View {
+        HStack(spacing: 12) {
+            ArtworkImage(url: track.coverUrl)
+                .frame(width: 46, height: 46)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                }
+                .shadow(color: Color.black.opacity(0.35), radius: 8, y: 4)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(track.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.95))
+                    .lineLimit(1)
+                Text(qualityLine(track))
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(0.55))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                player.toggleFavorite()
+            } label: {
+                Image(systemName: player.isFavorite ? "star.fill" : "star")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(player.isFavorite ? Theme.like : Color.white.opacity(0.88))
+                    .frame(width: 38, height: 38)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.88))
+                    .frame(width: 38, height: 38)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .contentShape(Rectangle())
+        .gesture(dismissGesture)
     }
 
     private func qualityLine(_ track: Track) -> String {
@@ -118,30 +166,29 @@ struct PlayerView: View {
     // MARK: - 主体
 
     @ViewBuilder
-    private func pageBody(_ track: Track) -> some View {
+    private func pageBody(_ track: Track, width: CGFloat) -> some View {
         ZStack {
             if page == .lyrics {
-                lyricsPage
+                lyricsPage(width: width)
                     .transition(.opacity)
             } else {
-                coverPage(track)
+                coverPage(track, width: width)
                     .transition(.opacity.combined(with: .scale(scale: 1.03)))
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: width)
     }
 
-    // MARK: - 歌词页
-
     @ViewBuilder
-    private var lyricsPage: some View {
+    private func lyricsPage(width: CGFloat) -> some View {
         if !player.lyrics.lines.isEmpty {
             LyricsPane(
                 lines: player.lyrics.lines,
                 activeIndex: LyricsParser.activeIndex(
                     player.lyrics.lines,
                     positionMs: player.position * 1000
-                )
+                ),
+                width: width
             ) { seconds in
                 player.seek(to: seconds)
                 if !player.isPlaying { player.togglePlayPause() }
@@ -175,76 +222,38 @@ struct PlayerView: View {
                             .foregroundStyle(Color.white.opacity(0.92))
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
-                            .glass(radius: 16, tint: 0.07)
+                            .chromeGlass(radius: 16)
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 2)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: width, height: 360)
         }
     }
 
-    // MARK: - 封面页
-
-    private func coverPage(_ track: Track) -> some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 6)
-
+    private func coverPage(_ track: Track, width: CGFloat) -> some View {
+        VStack {
+            Spacer(minLength: 0)
             ArtworkImage(url: track.coverUrl)
-                .aspectRatio(1, contentMode: .fit)
+                .frame(width: width, height: width)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
                 }
-                .shadow(color: Color.black.opacity(0.55), radius: 32, y: 20)
-                .scaleEffect(player.isPlaying ? 1 : 0.93)
+                .shadow(color: Color.black.opacity(0.55), radius: 30, y: 18)
+                .scaleEffect(player.isPlaying ? 1 : 0.94)
                 .animation(.spring(response: 0.5, dampingFraction: 0.82), value: player.isPlaying)
-
-            Spacer(minLength: 18)
-
-            VStack(spacing: 5) {
-                Text(track.title)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Color.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                Text(track.artistLine)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.55))
-                    .lineLimit(1)
-                if let album = track.album?.title, !album.isEmpty {
-                    Text(album)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.white.opacity(0.32))
-                        .lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 12)
-
-            Spacer(minLength: 10)
+            Spacer(minLength: 0)
         }
-        .gesture(
-            DragGesture(minimumDistance: 18)
-                .onChanged { value in
-                    dragOffset = max(0, value.translation.height * 0.5)
-                }
-                .onEnded { value in
-                    if value.translation.height > 110 {
-                        dismiss()
-                    }
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
-                        dragOffset = 0
-                    }
-                }
-        )
+        .frame(width: width)
     }
 
-    // MARK: - 底部控制条
+    // MARK: - 进度
 
-    private var transport: some View {
-        VStack(spacing: 7) {
+    private var progressBlock: some View {
+        VStack(spacing: 4) {
             ScrubBar(value: player.progress) { fraction in
                 guard player.duration > 0 else { return }
                 player.seek(to: player.duration * fraction)
@@ -255,88 +264,92 @@ struct PlayerView: View {
                 Spacer(minLength: 8)
                 Text("-" + timeLabel(max(0, player.duration - player.position)))
             }
-            .font(.system(size: 10, weight: .medium, design: .rounded))
-            .foregroundStyle(Color.white.opacity(0.42))
-
-            HStack(spacing: 0) {
-                Button {
-                    player.cycleMode()
-                } label: {
-                    Image(systemName: player.mode.symbol)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.62))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    player.previous()
-                } label: {
-                    Image(systemName: "backward.fill")
-                        .font(.system(size: 21, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.94))
-                        .frame(width: 52, height: 52)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    player.togglePlayPause()
-                } label: {
-                    ZStack {
-                        Circle().fill(Color.white)
-                        if player.isBuffering && player.isPlaying {
-                            ProgressView().tint(Color.black).scaleEffect(0.8)
-                        } else {
-                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 19, weight: .bold))
-                                .foregroundStyle(Color.black)
-                                .offset(x: player.isPlaying ? 0 : 1)
-                        }
-                    }
-                    .frame(width: 56, height: 56)
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    player.next()
-                } label: {
-                    Image(systemName: "forward.fill")
-                        .font(.system(size: 21, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.94))
-                        .frame(width: 52, height: 52)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    player.toggleFavorite()
-                } label: {
-                    Image(systemName: player.isFavorite ? "heart.fill" : "heart")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(player.isFavorite ? Theme.like : Color.white.opacity(0.62))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.top, 1)
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .foregroundStyle(Color.white.opacity(0.45))
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
-        .glass(radius: 30, tint: 0.06)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+    }
+
+    // MARK: - 传输控制
+
+    private var transportRow: some View {
+        HStack(spacing: 0) {
+            Button {
+                player.previous()
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.95))
+                    .frame(width: 64, height: 56)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 0)
+
+            Button {
+                player.togglePlayPause()
+            } label: {
+                ZStack {
+                    Circle().fill(Color.white)
+                    if player.isBuffering && player.isPlaying {
+                        ProgressView().tint(Color.black).scaleEffect(0.85)
+                    } else {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(Color.black)
+                            .offset(x: player.isPlaying ? 0 : 1.5)
+                    }
+                }
+                .frame(width: 58, height: 58)
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 0)
+
+            Button {
+                player.next()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.95))
+                    .frame(width: 64, height: 56)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 6)
+    }
+
+    // MARK: - 底部功能行
+
+    private var bottomRow: some View {
+        HStack {
+            iconButton(player.mode.symbol) {
+                player.cycleMode()
+            }
+            Spacer(minLength: 0)
+            iconButton(page == .lyrics ? "photo" : "quote.bubble") {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                    page = (page == .lyrics ? .cover : .lyrics)
+                }
+            }
+            Spacer(minLength: 0)
+            iconButton("list.bullet") {
+                nav.showQueue = true
+            }
+        }
+        .padding(.horizontal, 22)
+    }
+
+    private func iconButton(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.62))
+                .frame(width: 44, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func timeLabel(_ seconds: Double) -> String {
@@ -351,75 +364,82 @@ struct PlayerView: View {
 private struct LyricsPane: View {
     let lines: [LyricsLine]
     let activeIndex: Int
+    /// 由播放页显式传入：不接受 ScrollView 自己的宽度推导，避免内容撑宽页面。
+    let width: CGFloat
     let onSeek: (Double) -> Void
 
     /// 手动滑动歌词后短暂停止自动跟随，否则手指还没松就开始被拽回当前行。
     @State private var manualScrollingUntil: Date = .distantPast
 
     var body: some View {
-        // 宽度必须由容器给出。交给 ScrollView 自己算的话，某些超长行会把
-        // 内容宽度撑到屏幕之外，整页跟着变宽、左右被裁掉（顶栏按钮也会被顶出去）。
-        GeometryReader { geometry in
-            let contentWidth = max(0, geometry.size.width - 12)
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Color.clear.frame(height: 46)
-                        ForEach(lines.indices, id: \.self) { index in
-                            row(index, width: contentWidth)
-                        }
-                        Color.clear.frame(height: 96)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    Color.clear.frame(height: 88)
+                    ForEach(lines.indices, id: \.self) { index in
+                        row(index)
                     }
-                    .frame(width: contentWidth, alignment: .leading)
-                    .padding(.horizontal, 6)
+                    Color.clear.frame(height: 140)
                 }
-                .mask(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0),
-                            .init(color: .black, location: 0.10),
-                            .init(color: .black, location: 0.88),
-                            .init(color: .clear, location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+                .frame(width: width, alignment: .leading)
+            }
+            .frame(width: width)
+            .clipped()
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: 0.14),
+                        .init(color: .black, location: 0.86),
+                        .init(color: .clear, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 6)
-                        .onChanged { _ in
-                            manualScrollingUntil = Date().addingTimeInterval(2.5)
-                        }
-                )
-                .onChange(of: activeIndex) { value in
-                    guard value >= 0, Date() >= manualScrollingUntil else { return }
-                    withAnimation(.spring(response: 0.52, dampingFraction: 0.86)) {
-                        proxy.scrollTo(value, anchor: .center)
+            )
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6)
+                    .onChanged { _ in
+                        manualScrollingUntil = Date().addingTimeInterval(2.5)
                     }
-                }
-                .onAppear {
-                    guard activeIndex > 0 else { return }
-                    proxy.scrollTo(activeIndex, anchor: .center)
+            )
+            .onChange(of: activeIndex) { value in
+                guard value >= 0, Date() >= manualScrollingUntil else { return }
+                withAnimation(.spring(response: 0.52, dampingFraction: 0.86)) {
+                    proxy.scrollTo(value, anchor: .center)
                 }
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            .onAppear {
+                guard activeIndex > 0 else { return }
+                proxy.scrollTo(activeIndex, anchor: .center)
+            }
         }
     }
 
-    private func row(_ index: Int, width: CGFloat) -> some View {
+    private func row(_ index: Int) -> some View {
         let line = lines[index]
         let isActive = index == activeIndex
-        return VStack(alignment: .leading, spacing: 5) {
-            Text(line.text.isEmpty ? " " : line.text)
-                .font(.system(size: isActive ? 26 : 22, weight: isActive ? .bold : .semibold))
-                .foregroundStyle(isActive ? Color.white : Color.white.opacity(0.38))
-                .lineSpacing(2)
+        let distance = abs(index - activeIndex)
+        let opacity: Double = {
+            guard activeIndex >= 0 else { return 0.55 }
+            if isActive { return 1 }
+            // 离当前行越远越淡，接近 Apple Music 那种「聚光」感。
+            return max(0.16, 0.60 - Double(distance) * 0.11)
+        }()
+
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(line.text)
+                .font(.system(size: isActive ? 25 : 21, weight: isActive ? .bold : .regular))
+                .foregroundStyle(Color.white.opacity(opacity))
+                .lineSpacing(3)
                 .multilineTextAlignment(.leading)
+                .frame(width: width, alignment: .leading)
             if let translation = line.translation, !translation.isEmpty {
                 Text(translation)
                     .font(.system(size: isActive ? 15 : 14, weight: .medium))
                     .foregroundStyle(Color.white.opacity(isActive ? 0.7 : 0.28))
                     .multilineTextAlignment(.leading)
+                    .frame(width: width, alignment: .leading)
             }
         }
         .frame(width: width, alignment: .leading)
@@ -495,7 +515,7 @@ private struct ArtworkImage: View {
                     endPoint: .bottomTrailing
                 )
                 Image(systemName: "music.note")
-                    .font(.system(size: 38, weight: .light))
+                    .font(.system(size: 16, weight: .light))
                     .foregroundStyle(Color.white.opacity(0.16))
             }
         }
@@ -515,23 +535,5 @@ private struct ArtworkImage: View {
             return
         }
         image = await CoverCache.shared.image(for: url)
-    }
-}
-
-// MARK: - 玻璃圆钮
-
-private struct GlassCircleButton: View {
-    let systemName: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.86))
-                .frame(width: 34, height: 34)
-                .glass(radius: 17, tint: 0.07)
-        }
-        .buttonStyle(.plain)
     }
 }
