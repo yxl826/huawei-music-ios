@@ -1,14 +1,14 @@
-底部 TabBar 换回系统实现（v1.1.0 的做法）
+迷你播放条改用 tabViewBottomAccessory，与 dock 完全对齐
 
-自己手写的那条 dock 永远差一截：没有系统的选中态滑动、没有按住拖动，
-在 iOS 26 上也拿不到真正的 Liquid Glass 行为。回到 v1.1.0 的结构——
+之前是自己在 TabBar 上方画一张卡片，左右各留 12pt、圆角 18，
+无论怎么调都和系统 dock 的宽度/圆角对不上（用户：am 的是和 dock 栏对齐的）。
 
-- `TabView` + `.tabItem`，三个 Tab（首页 / 音乐厅 / 我的），选中色用主题红
-- iOS 26 不再覆盖 `UITabBarAppearance`（覆盖等于把系统玻璃关掉），
-  只有 iOS 16–18 才压成近黑
-- 迷你播放卡改成浮在 TabBar 上方的卡片：overlay 在底部，左右 12、底部 6；
-  滚动内容用 contentMargins 留出 74pt，可以从卡片下面滚过去
-- 搜索不再占 Tab：改成 fullScreenCover 包一层 NavigationStack 打开搜索页，
-  右上角放大镜触发，「取消」直接关掉
-- 去掉自写的 BottomChrome / FloatingTabBar / dockTabs
-- 版本 1.4.0
+iOS 26 正好有专门 API：`.tabViewBottomAccessory { ... }`，Apple Music 的迷你播放条
+用的就是它。系统按 TabBar 的尺寸与圆角绘制容器并把内容放进去，宽度天然与 dock 一致，
+内容也不再自己加背景/圆角/左右留白。
+
+- 新增 MiniPlayerAccessory（纯内容：38pt 封面 + 歌名/歌手 + 播放/下一首）
+- 新增 miniPlayerAccessory()：iOS 26 走系统附属视图，更早的系统什么都不做
+- 新增 miniPlayerOverlayIfNeeded()：iOS 26 不再叠旧卡片，避免两层
+- 滚动内容底部留白：iOS 26 只补 8pt（系统已占位），旧系统仍按卡片高度留
+- 版本 1.4.1

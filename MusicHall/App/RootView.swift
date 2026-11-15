@@ -13,7 +13,7 @@ struct RootView: View {
                 NavigationStack {
                     HomeView()
                 }
-                .miniPlayerOverlay()
+                .miniPlayerOverlayIfNeeded()
                 .tabItem {
                     Label(AppTab.home.title, systemImage: AppTab.home.activeSymbol)
                 }
@@ -22,7 +22,7 @@ struct RootView: View {
                 NavigationStack {
                     HallView()
                 }
-                .miniPlayerOverlay()
+                .miniPlayerOverlayIfNeeded()
                 .tabItem {
                     Label(AppTab.hall.title, systemImage: AppTab.hall.activeSymbol)
                 }
@@ -31,13 +31,15 @@ struct RootView: View {
                 NavigationStack {
                     LibraryView()
                 }
-                .miniPlayerOverlay()
+                .miniPlayerOverlayIfNeeded()
                 .tabItem {
                     Label(AppTab.library.title, systemImage: AppTab.library.activeSymbol)
                 }
                 .tag(AppTab.library)
             }
             .tint(Theme.like)
+            // iOS 26 起交给系统：底部附属视图会贴着 dock 绘制，宽度、圆角、玻璃都和 dock 一致。
+            .miniPlayerAccessory()
 
             toastOverlay
         }
