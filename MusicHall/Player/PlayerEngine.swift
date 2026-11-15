@@ -15,6 +15,8 @@ final class PlayerEngine: ObservableObject {
     @Published private(set) var duration: Double = 0
     @Published private(set) var lyrics: LyricsDoc = .empty
     @Published private(set) var isLoadingLyrics = false
+    /// 没取到歌词时的原因（给空态展示，方便判断是接口问题还是曲目本身没有）。
+    @Published private(set) var lyricsNote = ""
     @Published private(set) var isFavorite = false
     @Published private(set) var actualQuality: String = "unknown"
     @Published var mode: PlayMode = .sequential {
@@ -45,6 +47,7 @@ final class PlayerEngine: ObservableObject {
     private var failObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private var loadGeneration = 0
+    private var lyricsGeneration = 0
     private var pendingSeek: Double?
     private var shuffleHistory: [Int] = []
     private var listenedSeconds: Double = 0
@@ -175,6 +178,7 @@ final class PlayerEngine: ObservableObject {
             self.position = 0
             duration = 0
             lyrics = .empty
+            lyricsNote = ""
             updateNowPlaying()
             persistQueueSoon()
             return
@@ -307,9 +311,33 @@ final class PlayerEngine: ObservableObject {
         position = 0
         duration = 0
         lyrics = .empty
+        lyricsNote = ""
         isFavorite = false
         updateNowPlaying()
         UserDefaults.standard.removeObject(forKey: queueStorageKey)
+    }
+
+    // MARK: - 歌词
+
+    private func loadLyrics(for track: Track) {
+        lyricsGeneration += 1
+        let mine = lyricsGeneration
+        isLoadingLyrics = true
+        lyricsNote = ""
+        Task {
+            let document = try? await LyricsService.load(trackId: track.id)
+            guard mine == lyricsGeneration else { return }
+            isLoadingLyrics = false
+            if let document { lyrics = document }
+            if lyrics.lines.isEmpty { lyricsNote = LyricsService.lastDiagnostic }
+        }
+    }
+
+    /// 空态里的「重新加载」：先丢掉这首歌的歌词缓存，再拉一次。
+    func reloadLyrics() {
+        guard let track = current else { return }
+        LyricsService.forget(track.id)
+        loadLyrics(for: track)
     }
 
     // MARK: - 单曲解析
@@ -347,13 +375,7 @@ final class PlayerEngine: ObservableObject {
             }
         }
 
-        Task {
-            isLoadingLyrics = true
-            let document = try? await LyricsService.load(trackId: track.id)
-            guard generation == loadGeneration else { return }
-            isLoadingLyrics = false
-            if let document { lyrics = document }
-        }
+        loadLyrics(for: track)
 
         Task {
             let favorite = (try? await MusicAPI.shared.favoriteExist(track.id)) ?? false

@@ -40,4 +40,56 @@ extension View {
                     .stroke(Theme.line, lineWidth: 1)
             )
     }
+
+    /// 玻璃质感。iOS 26 起直接用系统的 Liquid Glass；iOS 16–18 用超薄材质 +
+    /// 高光描边 + 投影近似（观感接近，但不是系统那层折射）。
+    func glass(radius: CGFloat = 22, tint: Double = 0.05) -> some View {
+        modifier(GlassSurface(radius: radius, tint: tint))
+    }
+}
+
+struct GlassSurface: ViewModifier {
+    var radius: CGFloat = 22
+    var tint: Double = 0.05
+
+    func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        } else {
+            approximating(content)
+        }
+        #else
+        approximating(content)
+        #endif
+    }
+
+    @ViewBuilder
+    private func approximating(_ content: Content) -> some View {
+        content
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(Color.white.opacity(tint))
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.34),
+                                Color.white.opacity(0.05),
+                                Color.white.opacity(0.16)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            .shadow(color: Color.black.opacity(0.35), radius: 20, y: 8)
+    }
 }

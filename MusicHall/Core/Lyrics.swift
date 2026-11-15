@@ -155,34 +155,72 @@ enum LyricsParser {
 enum LyricsService {
     private static var cache: [String: LyricsDoc] = [:]
     private static let cacheLimit = 60
+    /// 最近一次没取到歌词的原因，给播放页的空态显示，避免只剩一句「没有歌词」。
+    private(set) static var lastDiagnostic: String = ""
 
     static func cached(_ trackId: String) -> LyricsDoc? {
         cache[trackId]
     }
 
+    static func forget(_ trackId: String) {
+        cache.removeValue(forKey: trackId)
+        lastDiagnostic = ""
+    }
+
     static func clearCache() {
         cache.removeAll()
+        lastDiagnostic = ""
     }
 
     static func load(trackId: String) async throws -> LyricsDoc {
         if let hit = cache[trackId] { return hit }
-        let response = try await MusicAPI.shared.playbackResponse(trackId: trackId, quality: .standard)
 
-        if let address = lyricAddress(response), let url = SafeURL.url(address) {
-            let raw = try? await Transport.boundedText(from: url)
-            if let raw {
-                let document = LyricsParser.parse(raw)
-                if !document.lines.isEmpty {
-                    store(trackId, document)
-                    return document
-                }
+        var response: JSON
+        do {
+            response = try await MusicAPI.shared.playbackResponse(trackId: trackId, quality: .standard)
+        } catch let standardError {
+            // 少数曲目只在无损解析的响应里带歌词地址，标准音质失败时再试一次。
+            do {
+                response = try await MusicAPI.shared.playbackResponse(trackId: trackId, quality: .lossless)
+            } catch {
+                lastDiagnostic = "解析播放地址失败：\(standardError.readableMessage)"
+                throw standardError
             }
         }
+
+        if let address = lyricAddress(response) {
+            if let url = SafeURL.url(address) {
+                do {
+                    let raw = try await Transport.boundedText(from: url)
+                    let document = LyricsParser.parse(raw)
+                    if !document.lines.isEmpty {
+                        store(trackId, document)
+                        lastDiagnostic = ""
+                        return document
+                    }
+                    lastDiagnostic = "歌词文件解析后为空（\(raw.count) 字）"
+                } catch {
+                    lastDiagnostic = "歌词下载失败：\(error.readableMessage)"
+                }
+            } else if let host = URL(string: address)?.host {
+                lastDiagnostic = "歌词地址不在可信域名：\(host)"
+            } else {
+                lastDiagnostic = "歌词地址不是合法 URL"
+            }
+        } else {
+            lastDiagnostic = "响应里没有歌词地址"
+        }
+
         if let inline = inlineLyrics(response) {
             let document = LyricsParser.parse(inline)
-            store(trackId, document)
-            return document
+            if !document.lines.isEmpty {
+                store(trackId, document)
+                lastDiagnostic = ""
+                return document
+            }
+            lastDiagnostic += "；内嵌歌词解析为空"
         }
+
         let empty = LyricsDoc.empty
         store(trackId, empty)
         return empty
