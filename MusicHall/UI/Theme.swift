@@ -61,7 +61,7 @@ struct ChromeGlass: ViewModifier {
         #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             content.glassEffect(
-                .regular.tint(Color.black.opacity(0.22)),
+                .regular.tint(Color.white.opacity(0.10)),
                 in: RoundedRectangle(cornerRadius: radius, style: .continuous)
             )
         } else {
@@ -80,7 +80,7 @@ struct ChromeGlass: ViewModifier {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .fill(.ultraThinMaterial)
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .fill(Color(hex: 0x131317).opacity(0.82))
+                        .fill(Color(hex: 0x1A1A20).opacity(0.86))
                 }
             }
             .overlay {

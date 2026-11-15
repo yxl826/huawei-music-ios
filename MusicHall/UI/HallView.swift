@@ -84,6 +84,11 @@ struct HallView: View {
         }
         .background(Theme.bg)
         .scrollIndicators(.hidden)
+        .overlay(alignment: .topTrailing) {
+            TopActionBar()
+                .padding(.trailing, Theme.pagePadding)
+                .padding(.top, 2)
+        }
         .refreshable { await load() }
         .task { await load() }
         .onChange(of: session.isAuthenticated) { _ in

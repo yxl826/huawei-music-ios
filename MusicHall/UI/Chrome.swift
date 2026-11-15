@@ -44,10 +44,10 @@ struct BottomChrome: View {
     @Binding var tab: AppTab
 
     /// 悬浮层占掉的高度，交给页面做底部留白。
-    static let tabBarHeight: CGFloat = 58
-    static let miniPlayerHeight: CGFloat = 62
-    static let gap: CGFloat = 8
-    static let bottomPadding: CGFloat = 6
+    static let tabBarHeight: CGFloat = 62
+    static let miniPlayerHeight: CGFloat = 60
+    static let gap: CGFloat = 10
+    static let bottomPadding: CGFloat = 4
     static let horizontalPadding: CGFloat = 12
 
     static func insetHeight(hasTrack: Bool) -> CGFloat {
@@ -74,16 +74,10 @@ struct MiniPlayerCard: View {
         if let track = player.current {
             VStack(spacing: 0) {
                 // 播放进度贴在卡片顶边，和 Apple Music 一样是一条极细的线。
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Color.clear
-                        Capsule()
-                            .fill(Color.white.opacity(0.9))
-                            .frame(width: max(0, geometry.size.width * player.progress), height: 2)
-                    }
-                }
-                .frame(height: 2)
-                .padding(.horizontal, 1)
+                // 单独一个观察时钟的小视图：卡片主体不跟着 2Hz 重绘。
+                MiniProgressLine()
+                    .frame(height: 2)
+                    .padding(.horizontal, 1)
 
                 HStack(spacing: 10) {
                     Cover(url: track.coverUrl, size: 44, radius: 8)
@@ -124,11 +118,40 @@ struct MiniPlayerCard: View {
                 .padding(.bottom, 7)
             }
             .frame(height: BottomChrome.miniPlayerHeight)
-            .chromeGlass(radius: 18)
+            .chromeGlass(radius: 19)
             .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
             .onTapGesture { nav.showPlayer = true }
             .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
+    }
+}
+
+// MARK: - 顶部操作胶囊
+
+/// 右上角那枚玻璃胶囊（对应 Apple Music 页头右侧的按钮组）。
+/// 固定在页面右上角，内容从下面滚过，不参与滚动。
+struct TopActionBar: View {
+    @EnvironmentObject private var nav: NavState
+
+    var body: some View {
+        HStack(spacing: 0) {
+            button("magnifyingglass") { nav.tab = .search }
+            button("gearshape") { nav.showSettings = true }
+        }
+        .padding(.horizontal, 4)
+        .frame(height: 40)
+        .chromeGlass(radius: 20)
+    }
+
+    private func button(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.text.opacity(0.92))
+                .frame(width: 38, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -153,6 +176,27 @@ extension View {
     }
 }
 
+private struct MiniProgressLine: View {
+    @EnvironmentObject private var player: PlayerEngine
+    @EnvironmentObject private var clock: PlaybackClock
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Color.clear
+                Capsule()
+                    .fill(Color.white.opacity(0.9))
+                    .frame(width: max(0, geometry.size.width * progress), height: 2)
+            }
+        }
+    }
+
+    private var progress: Double {
+        guard player.duration > 0 else { return 0 }
+        return min(1, max(0, clock.position / player.duration))
+    }
+}
+
 // MARK: - 悬浮 Tab 栏
 
 struct FloatingTabBar: View {
@@ -164,7 +208,7 @@ struct FloatingTabBar: View {
                 item(tab)
             }
         }
-        .padding(.horizontal, 5)
+        .padding(.horizontal, 6)
         .frame(height: BottomChrome.tabBarHeight)
         .chromeGlass(radius: BottomChrome.tabBarHeight / 2)
     }
@@ -177,14 +221,14 @@ struct FloatingTabBar: View {
         } label: {
             VStack(spacing: 4) {
                 ZStack {
-                    // 选中项的图标底下垫一块浅色玻璃，和 iOS 26 的选中态一致。
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(isSelected ? Theme.like.opacity(0.16) : Color.clear)
-                        .frame(width: 46, height: 27)
+                    // 选中项的图标底下垫一块浅色块，对应 Apple Music 那种选中态。
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(isSelected ? Theme.like.opacity(0.20) : Color.clear)
+                        .frame(width: 48, height: 30)
                     Image(systemName: isSelected ? tab.activeSymbol : tab.symbol)
-                        .font(.system(size: 19, weight: .medium))
+                        .font(.system(size: 20, weight: .medium))
                 }
-                .frame(height: 27)
+                .frame(height: 30)
                 Text(tab.title)
                     .font(.system(size: 10, weight: isSelected ? .semibold : .medium))
             }

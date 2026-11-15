@@ -23,8 +23,18 @@ struct RemoteImage: View {
             }
         }
         .task(id: url) {
-            guard let url, image == nil else { return }
-            image = await CoverCache.shared.image(for: url)
+            // 不能加 `image == nil` 的短路：切歌时 url 变了但上一张图还在，
+            // 短路会让封面永远停在旧的那张（列表、迷你播放条都中招）。
+            guard let url, !url.isEmpty else {
+                image = nil
+                return
+            }
+            if let hit = CoverCache.shared.cached(url) {
+                image = hit
+                return
+            }
+            let loaded = await CoverCache.shared.image(for: url)
+            if !Task.isCancelled { image = loaded }
         }
     }
 }

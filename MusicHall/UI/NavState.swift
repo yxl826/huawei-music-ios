@@ -6,6 +6,7 @@ final class NavState: ObservableObject {
     @Published var showLogin = false
     @Published var showPlayer = false
     @Published var showQueue = false
+    @Published var showSettings = false
 
     func requireLogin() -> Bool {
         if SessionBridge.isAuthenticated {

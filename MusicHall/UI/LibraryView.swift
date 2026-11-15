@@ -47,6 +47,11 @@ struct LibraryView: View {
         }
         .background(Theme.bg)
         .scrollIndicators(.hidden)
+        .overlay(alignment: .topTrailing) {
+            TopActionBar()
+                .padding(.trailing, Theme.pagePadding)
+                .padding(.top, 2)
+        }
         .toolbar(.hidden, for: .navigationBar)
     }
 

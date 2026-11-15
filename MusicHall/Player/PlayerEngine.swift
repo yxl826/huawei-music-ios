@@ -3,6 +3,12 @@ import Combine
 import MediaPlayer
 import UIKit
 
+/// 只有播放进度。单独成对象，是为了让「每秒两次」的更新不影响其它视图。
+@MainActor
+final class PlaybackClock: ObservableObject {
+    @Published var position: Double = 0
+}
+
 /// 播放内核：一个 AVPlayer + 队列 + 单曲解析。
 /// 只有「当前曲目变化」才会去解析播放地址，避免每帧都打接口。
 @MainActor
@@ -11,7 +17,10 @@ final class PlayerEngine: ObservableObject {
     @Published private(set) var index: Int = -1
     @Published private(set) var isPlaying = false
     @Published private(set) var isBuffering = false
-    @Published private(set) var position: Double = 0
+    /// 播放进度单独一个发布源：2Hz 的更新只惊动进度条、歌词这几个小视图，
+    /// 不会带着玻璃层、列表、Tab 栏一起重绘（那是「整个软件卡卡的」的主因）。
+    let clock = PlaybackClock()
+    var position: Double { clock.position }
     @Published private(set) var duration: Double = 0
     @Published private(set) var lyrics: LyricsDoc = .empty
     @Published private(set) var isLoadingLyrics = false
@@ -134,7 +143,7 @@ final class PlayerEngine: ObservableObject {
         else { return }
         queue = saved.tracks
         index = min(max(0, saved.index), saved.tracks.count - 1)
-        position = saved.positionSeconds
+        clock.position = saved.positionSeconds
         loadCurrent(autoplay: false, seekTo: saved.positionSeconds)
     }
 
@@ -178,7 +187,7 @@ final class PlayerEngine: ObservableObject {
             player.replaceCurrentItem(with: nil)
             isPlaying = false
             isBuffering = false
-            self.position = 0
+            clock.position = 0
             duration = 0
             lyrics = .empty
             lyricsNote = ""
@@ -281,7 +290,7 @@ final class PlayerEngine: ObservableObject {
         let target = max(0, min(seconds, duration > 0 ? duration : seconds))
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero)
-        position = target
+        clock.position = target
         updateNowPlaying()
         persistQueueSoon()
     }
@@ -311,7 +320,7 @@ final class PlayerEngine: ObservableObject {
         index = -1
         isPlaying = false
         isBuffering = false
-        position = 0
+        clock.position = 0
         duration = 0
         lyrics = .empty
         lyricsNote = ""
@@ -355,7 +364,7 @@ final class PlayerEngine: ObservableObject {
         lyrics = .empty
         isFavorite = false
         isBuffering = true
-        position = seekTo ?? 0
+        clock.position = seekTo ?? 0
         duration = track.durationSeconds ?? 0
         pendingSeek = seekTo
         updateNowPlaying()
@@ -398,9 +407,9 @@ final class PlayerEngine: ObservableObject {
         if let target = pendingSeek, target > 0 {
             player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                         toleranceBefore: .zero, toleranceAfter: .zero)
-            position = target
+            clock.position = target
         } else {
-            position = 0
+            clock.position = 0
         }
         pendingSeek = nil
         if autoplay {
@@ -427,8 +436,8 @@ final class PlayerEngine: ObservableObject {
         lastTickSeconds = seconds
 
         // 位置只在真的变化时推送，避免定时器空转让整棵树重绘。
-        if abs(position - seconds) >= 0.05 {
-            position = seconds
+        if abs(clock.position - seconds) >= 0.05 {
+            clock.position = seconds
         }
         if duration <= 0, let itemDuration = player.currentItem?.duration.seconds,
            itemDuration.isFinite, itemDuration > 0 {

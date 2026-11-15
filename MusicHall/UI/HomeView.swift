@@ -36,6 +36,11 @@ struct HomeView: View {
         .background(Theme.bg)
         .scrollIndicators(.hidden)
         .refreshable { await load() }
+        .overlay(alignment: .topTrailing) {
+            TopActionBar()
+                .padding(.trailing, Theme.pagePadding)
+                .padding(.top, 2)
+        }
         .task { await load() }
         .onChange(of: session.isAuthenticated) { _ in
             Task { await load() }

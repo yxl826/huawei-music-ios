@@ -24,24 +24,30 @@ struct PlayerView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            ZStack {
-                ArtworkBackdrop(url: player.current?.coverUrl)
+        ZStack {
+            // 背景必须是 ZStack 的独立一层：`ignoresSafeArea()` 只作用在这一层，
+            // 才能铺到状态栏与 Home 指示条下面。之前把背景和内容一起塞进
+            // `.frame(...)+.clipped()`，等于又把它收回安全区，于是上下各留一条黑边。
+            // 参考 Apple 文档《Adding a background to your view》里「Extend the background into the safe areas」。
+            ArtworkBackdrop(url: player.current?.coverUrl)
 
-                if let track = player.current {
-                    content(track, width: width)
-                } else {
-                    EmptyHint(
-                        title: "还没有在播放的歌",
-                        detail: "从收藏、歌单或搜索里点一首开始。",
-                        systemImage: "play.circle"
-                    )
-                    .padding(.horizontal, 30)
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                Group {
+                    if let track = player.current {
+                        content(track, width: width)
+                    } else {
+                        EmptyHint(
+                            title: "还没有在播放的歌",
+                            detail: "从收藏、歌单或搜索里点一首开始。",
+                            systemImage: "play.circle"
+                        )
+                        .padding(.horizontal, 30)
+                    }
                 }
+                .frame(width: width, height: geometry.size.height)
+                .clipped()
             }
-            .frame(width: width, height: geometry.size.height)
-            .clipped()
         }
         .preferredColorScheme(.dark)
         .offset(y: dragOffset)
@@ -63,7 +69,7 @@ struct PlayerView: View {
             pageBody(track, width: max(0, width - sidePadding * 2))
                 .frame(maxHeight: .infinity)
 
-            progressBlock
+            ProgressSection()
                 .padding(.top, 6)
 
             transportRow
@@ -182,17 +188,7 @@ struct PlayerView: View {
     @ViewBuilder
     private func lyricsPage(width: CGFloat) -> some View {
         if !player.lyrics.lines.isEmpty {
-            LyricsPane(
-                lines: player.lyrics.lines,
-                activeIndex: LyricsParser.activeIndex(
-                    player.lyrics.lines,
-                    positionMs: player.position * 1000
-                ),
-                width: width
-            ) { seconds in
-                player.seek(to: seconds)
-                if !player.isPlaying { player.togglePlayPause() }
-            }
+            LyricsSection(lines: player.lyrics.lines, width: width)
         } else {
             VStack(spacing: 12) {
                 if player.isLoadingLyrics {
@@ -251,23 +247,6 @@ struct PlayerView: View {
     }
 
     // MARK: - 进度
-
-    private var progressBlock: some View {
-        VStack(spacing: 4) {
-            ScrubBar(value: player.progress) { fraction in
-                guard player.duration > 0 else { return }
-                player.seek(to: player.duration * fraction)
-            }
-
-            HStack {
-                Text(timeLabel(player.position))
-                Spacer(minLength: 8)
-                Text("-" + timeLabel(max(0, player.duration - player.position)))
-            }
-            .font(.system(size: 11, weight: .medium, design: .rounded))
-            .foregroundStyle(Color.white.opacity(0.45))
-        }
-    }
 
     // MARK: - 传输控制
 
@@ -359,14 +338,73 @@ struct PlayerView: View {
     }
 }
 
+// MARK: - 歌词 / 进度（各自观察时钟，避免整页跟着走）
+
+private struct LyricsSection: View {
+    @EnvironmentObject private var clock: PlaybackClock
+
+    let lines: [LyricsLine]
+    let width: CGFloat
+
+    @State private var activeIndex: Int = -1
+
+    var body: some View {
+        LyricsPane(lines: lines, activeIndex: activeIndex, width: width)
+            .onAppear(perform: sync)
+            .onChange(of: clock.position) { _ in sync() }
+            .onChange(of: lines.count) { _ in sync() }
+    }
+
+    private func sync() {
+        let index = LyricsParser.activeIndex(lines, positionMs: clock.position * 1000)
+        if index != activeIndex {
+            activeIndex = index
+        }
+    }
+}
+
+private struct ProgressSection: View {
+    @EnvironmentObject private var player: PlayerEngine
+    @EnvironmentObject private var clock: PlaybackClock
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ScrubBar(value: progress) { fraction in
+                guard player.duration > 0 else { return }
+                player.seek(to: player.duration * fraction)
+            }
+
+            HStack {
+                Text(Self.label(clock.position))
+                Spacer(minLength: 8)
+                Text("-" + Self.label(max(0, player.duration - clock.position)))
+            }
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .foregroundStyle(Color.white.opacity(0.45))
+        }
+    }
+
+    private var progress: Double {
+        guard player.duration > 0 else { return 0 }
+        return min(1, max(0, clock.position / player.duration))
+    }
+
+    private static func label(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
 // MARK: - 歌词正文
 
 private struct LyricsPane: View {
+    @EnvironmentObject private var player: PlayerEngine
+
     let lines: [LyricsLine]
     let activeIndex: Int
     /// 由播放页显式传入：不接受 ScrollView 自己的宽度推导，避免内容撑宽页面。
     let width: CGFloat
-    let onSeek: (Double) -> Void
 
     /// 手动滑动歌词后短暂停止自动跟随，否则手指还没松就开始被拽回当前行。
     @State private var manualScrollingUntil: Date = .distantPast
@@ -446,9 +484,9 @@ private struct LyricsPane: View {
         .id(index)
         .contentShape(Rectangle())
         .onTapGesture {
-            if let timeMs = line.timeMs {
-                onSeek(timeMs / 1000)
-            }
+            guard let timeMs = line.timeMs else { return }
+            player.seek(to: timeMs / 1000)
+            if !player.isPlaying { player.togglePlayPause() }
         }
     }
 }

@@ -19,6 +19,7 @@ struct MusicHallApp: App {
                 .environmentObject(session)
                 .environmentObject(settings)
                 .environmentObject(player)
+                .environmentObject(player.clock)
                 .environmentObject(nav)
                 .environmentObject(toast)
                 .preferredColorScheme(.dark)

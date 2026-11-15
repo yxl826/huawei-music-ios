@@ -60,6 +60,17 @@ struct RootView: View {
         .sheet(isPresented: $nav.showLogin) {
             LoginSheet()
         }
+        .sheet(isPresented: $nav.showSettings) {
+            NavigationStack {
+                SettingsView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") { nav.showSettings = false }
+                        }
+                    }
+            }
+            .preferredColorScheme(.dark)
+        }
         .fullScreenCover(isPresented: $nav.showPlayer) {
             PlayerView()
         }
