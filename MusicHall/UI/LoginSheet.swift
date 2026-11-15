@@ -49,6 +49,14 @@ final class LoginModel: ObservableObject {
             onSuccess?(session)
         } catch {
             isExchanging = false
+            if let apiError = error as? APIError, apiError.isInvalidGrant {
+                // 授权码只能用一次、几分钟就过期：卡在这里重试同一段 code 永远失败，
+                // 直接把登录页换成新的一次尝试，让用户再登录一遍。
+                let detail = apiError.errorDescription ?? "授权码已失效"
+                restart()
+                errorMessage = "\(detail)。登录页已刷新，请重新授权。"
+                return
+            }
             errorMessage = error.readableMessage
         }
     }

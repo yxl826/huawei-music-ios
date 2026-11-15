@@ -101,11 +101,13 @@ enum Transport {
                     throw APIError.network(stage)
                 }
                 guard let json = JSONValue.object(data) else {
-                    throw APIError.provider(stage: stage, status: http.statusCode, code: "unknown")
+                    throw APIError.provider(stage: stage, status: http.statusCode, code: "unknown", detail: nil)
                 }
-                let code = JSONValue.text(JSONValue.dict(json["result"])["resultCode"]) ?? "unknown"
+                let result = JSONValue.dict(json["result"])
+                let code = JSONValue.text(result["resultCode"]) ?? "unknown"
                 if http.statusCode >= 400 || code != "000000" {
-                    throw APIError.provider(stage: stage, status: http.statusCode, code: code)
+                    throw APIError.provider(stage: stage, status: http.statusCode, code: code,
+                                            detail: JSONValue.text(result["resultMsg"]))
                 }
                 return json
             } catch let error as APIError {

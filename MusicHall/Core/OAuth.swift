@@ -101,15 +101,14 @@ enum OAuth {
         request.httpMethod = "POST"
         request.timeoutInterval = 25
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        var components = URLComponents()
-        components.queryItems = [
-            URLQueryItem(name: "grant_type", value: "authorization_code"),
-            URLQueryItem(name: "client_id", value: attempt.clientId),
-            URLQueryItem(name: "redirect_uri", value: attempt.redirectUri),
-            URLQueryItem(name: "code", value: code),
-            URLQueryItem(name: "code_verifier", value: attempt.verifier)
-        ]
-        request.httpBody = components.percentEncodedQuery?.data(using: .utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = formBody([
+            ("grant_type", "authorization_code"),
+            ("client_id", attempt.clientId),
+            ("redirect_uri", attempt.redirectUri),
+            ("code", code),
+            ("code_verifier", attempt.verifier)
+        ])
 
         let data: Data
         let response: URLResponse
@@ -120,13 +119,42 @@ enum OAuth {
         }
         guard let http = response as? HTTPURLResponse else { throw APIError.network("授权码兑换") }
         let json = JSONValue.object(data) ?? [:]
-        guard http.statusCode < 400, json["error"] == nil,
-              let accessToken = JSONValue.text(json["access_token"])
-        else {
-            let code = JSONValue.text(json["error"]) ?? "unknown"
-            throw APIError.provider(stage: "授权码兑换", status: http.statusCode, code: code)
+        if let errorCode = JSONValue.code(json["error"]) {
+            throw APIError.provider(stage: "授权码兑换", status: http.statusCode,
+                                    code: errorCode, detail: shortDetail(json["error_description"]))
+        }
+        guard http.statusCode < 400, let accessToken = JSONValue.text(json["access_token"]) else {
+            throw APIError.provider(stage: "授权码兑换", status: http.statusCode,
+                                    code: "unknown", detail: nil)
         }
         return accessToken
+    }
+
+    /// OAuth 表单编码：只保留 RFC 3986 的 unreserved 字符，其余全部百分号转义。
+    ///
+    /// 不能用 `URLComponents.percentEncodedQuery`：它会把 `+` 原样留在查询串里，
+    /// 而服务端按 `application/x-www-form-urlencoded` 解码时 `+` 等于空格，
+    /// 于是 code / code_verifier 被悄悄改掉，表现为 400 invalid code。
+    static func formBody(_ pairs: [(String, String)]) -> Data {
+        let unreserved = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+        )
+        let body = pairs.map { key, value -> String in
+            let encodedKey = key.addingPercentEncoding(withAllowedCharacters: unreserved) ?? key
+            let encodedValue = value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? value
+            return "\(encodedKey)=\(encodedValue)"
+        }.joined(separator: "&")
+        return Data(body.utf8)
+    }
+
+    /// 供应商的错误说明只取前 60 字并压平换行，避免把整段响应回显到界面。
+    static func shortDetail(_ value: Any?) -> String? {
+        guard let text = JSONValue.text(value) else { return nil }
+        let flat = text
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        return String(flat.prefix(60))
     }
 
     /// 账号令牌 → 音乐会话（loginex）。这一步的 Digest 头不带 token。

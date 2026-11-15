@@ -24,6 +24,13 @@ enum JSONValue {
         value as? String
     }
 
+    /// 错误码可能是数字（华为 OAuth 返回 `"error": 1103`）也可能是字符串，统一成文本。
+    static func code(_ value: Any?) -> String? {
+        if let string = text(value) { return string }
+        if let number = number(value), number < 10_000_000 { return String(Int(number)) }
+        return nil
+    }
+
     static func number(_ value: Any?) -> Double? {
         guard let value, !(value is NSNull) else { return nil }
         if let string = value as? String {
