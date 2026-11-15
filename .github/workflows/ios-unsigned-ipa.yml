@@ -87,23 +87,35 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 读取版本号
+        id: meta
+        run: |
+          APP_PATH="build/Build/Products/Release-iphoneos/MusicHall.app"
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Info.plist")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Info.plist")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "ipa=MusicHall-${VERSION}-unsigned.ipa" >> "$GITHUB_OUTPUT"
+          echo "::notice::版本 $VERSION（构建号 $BUILD）→ MusicHall-${VERSION}-unsigned.ipa"
+
       - name: 打包成 ipa
         run: |
           APP_PATH="build/Build/Products/Release-iphoneos/MusicHall.app"
+          IPA="${{ steps.meta.outputs.ipa }}"
           test -d "$APP_PATH"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist"
           rm -rf out && mkdir -p out/Payload
           cp -R "$APP_PATH" out/Payload/
           cd out
-          zip -qry ../MusicHall-unsigned.ipa Payload
+          zip -qry "../$IPA" Payload
           cd ..
-          ls -lh MusicHall-unsigned.ipa
+          ls -lh "$IPA"
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: MusicHall-unsigned-ipa
-          path: MusicHall-unsigned.ipa
+          name: MusicHall-${{ steps.meta.outputs.version }}-unsigned-ipa
+          path: ${{ steps.meta.outputs.ipa }}
           if-no-files-found: error
           retention-days: 30
 
@@ -111,8 +123,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: MusicHall-unsigned.ipa
+          files: ${{ steps.meta.outputs.ipa }}
           body: |
-            未签名 ipa，需要用 Sideloadly / AltStore / TrollStore 之类自行签名后安装。
+            未签名 ipa（`${{ steps.meta.outputs.ipa }}`，版本 ${{ steps.meta.outputs.version }} 构建号 ${{ steps.meta.outputs.build }}），
+            需要用 Sideloadly / AltStore / TrollStore 之类自行签名后安装。
 
             非官方客户端，与华为及其关联公司无隶属或合作关系，不提供任何音源，只播放你自己账号里已有权益的内容。

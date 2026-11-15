@@ -35,9 +35,15 @@ xcodebuild \
 APP_PATH="build/Build/Products/$CONFIG-iphoneos/MusicHall.app"
 [ -d "$APP_PATH" ] || { echo "没找到产物：$APP_PATH" >&2; exit 1; }
 
+# 版本号从编出来的 Info.plist 里取（由 project.yml 的 MARKETING_VERSION 决定），
+# 保证文件名和包里显示的版本永远一致。
+VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Info.plist")
+BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Info.plist")
+IPA="MusicHall-${VERSION}-unsigned.ipa"
+
 rm -rf out && mkdir -p out/Payload
 cp -R "$APP_PATH" out/Payload/
-( cd out && zip -qry ../MusicHall-unsigned.ipa Payload )
+( cd out && zip -qry "../$IPA" Payload )
 rm -rf out
-echo "完成：$ROOT/MusicHall-unsigned.ipa"
+echo "完成：$ROOT/$IPA（版本 $VERSION，构建号 $BUILD）"
 echo "下一步：用 Sideloadly / AltStore 用自己的 Apple ID 签名后装到 iPhone。"

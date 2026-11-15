@@ -81,8 +81,11 @@ git push -u origin main
 
 两种方式，任选其一：
 
-- **Releases（不用登录，最省事）**：打开 [Releases](../../releases/latest)，下载 `MusicHall-unsigned.ipa`。打 `v*` 标签时 CI 会自动把 ipa 附到 Release 上。
-- **Actions Artifacts**：进那次运行 → 底部 **Artifacts** → 下载 `MusicHall-unsigned-ipa` → 解压得到 `MusicHall-unsigned.ipa`。注意 artifact 会压缩成 zip。
+- **Releases（不用登录，最省事）**：打开 [Releases](../../releases/latest)，下载 `MusicHall-<版本号>-unsigned.ipa`（例如 `MusicHall-1.1.2-unsigned.ipa`）。打 `v*` 标签时 CI 会自动把 ipa 附到 Release 上。
+- **Actions Artifacts**：进那次运行 → 底部 **Artifacts** → 下载 `MusicHall-<版本号>-unsigned-ipa` → 解压得到同名 ipa。注意 artifact 会压缩成 zip。
+
+> 包名里的版本号取自编译产物的 `CFBundleShortVersionString`（即 `project.yml` 的 `MARKETING_VERSION`），
+> 所以文件名、Release 标题、App 设置里显示的版本永远是同一个值，不会出现「下了个 1.1.2 装完显示 1.1.1」。
 
 > 这个 ipa 是**未签名**的，不能直接装。下面用你自己的 Apple ID 签。
 
@@ -90,7 +93,7 @@ git push -u origin main
 
 1. iPhone：**设置 → 隐私与安全性 → 开发者模式 → 打开**（iOS 16+ 必须先开，重启生效）
 2. Windows 装 [Sideloadly](https://sideloadly.io/)，以及 iTunes 或「Apple Devices」应用（提供驱动）
-3. 用数据线连 iPhone，Sideloadly 里拖入 `MusicHall-unsigned.ipa`，Apple ID 填你自己的（免费账号即可）
+3. 用数据线连 iPhone，Sideloadly 里拖入 `MusicHall-<版本号>-unsigned.ipa`，Apple ID 填你自己的（免费账号即可）
 4. 点 Start，等它签名 + 安装
 5. iPhone：**设置 → 通用 → VPN 与设备管理 → 信任** 你的开发者证书，然后打开 App
 
