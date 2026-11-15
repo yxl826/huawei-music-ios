@@ -13,7 +13,7 @@ struct RootView: View {
                 NavigationStack {
                     HomeView()
                 }
-                .toolbar(.hidden, for: .tabBar)
+                .miniPlayerOverlay()
                 .tabItem {
                     Label(AppTab.home.title, systemImage: AppTab.home.activeSymbol)
                 }
@@ -22,33 +22,22 @@ struct RootView: View {
                 NavigationStack {
                     HallView()
                 }
-                .toolbar(.hidden, for: .tabBar)
+                .miniPlayerOverlay()
                 .tabItem {
                     Label(AppTab.hall.title, systemImage: AppTab.hall.activeSymbol)
                 }
                 .tag(AppTab.hall)
 
                 NavigationStack {
-                    SearchView()
-                }
-                .toolbar(.hidden, for: .tabBar)
-                .tabItem {
-                    Label(AppTab.search.title, systemImage: AppTab.search.symbol)
-                }
-                .tag(AppTab.search)
-
-                NavigationStack {
                     LibraryView()
                 }
-                .toolbar(.hidden, for: .tabBar)
+                .miniPlayerOverlay()
                 .tabItem {
                     Label(AppTab.library.title, systemImage: AppTab.library.activeSymbol)
                 }
                 .tag(AppTab.library)
             }
-            .tint(Theme.text)
-
-            BottomChrome(tab: $nav.tab)
+            .tint(Theme.like)
 
             toastOverlay
         }
@@ -69,6 +58,12 @@ struct RootView: View {
         }
         .fullScreenCover(isPresented: $nav.showPlayer) {
             PlayerView()
+        }
+        .fullScreenCover(isPresented: $nav.showSearch) {
+            NavigationStack {
+                SearchView()
+            }
+            .preferredColorScheme(.dark)
         }
         .onChange(of: player.errorMessage) { message in
             guard let message, !message.isEmpty else { return }
@@ -118,7 +113,7 @@ struct RootView: View {
                 .background(Theme.surface3, in: Capsule())
                 .overlay(Capsule().stroke(Theme.line, lineWidth: 1))
                 .padding(.horizontal, 40)
-                .padding(.bottom, player.current == nil ? 86 : BottomChrome.insetHeight(hasTrack: true) + 8)
+                .padding(.bottom, player.current == nil ? 78 : MiniPlayerCard.height + 34)
                 .transition(.opacity)
         }
     }

@@ -1,8 +1,14 @@
-歌词加上 Apple Music 那种「焦点」效果
+底部 TabBar 换回系统实现（v1.1.0 的做法）
 
-- 每行按与当前行的距离算高斯模糊与透明度：当前行清晰加粗（25pt bold），
-  相邻行 blur 0.9pt 起、每远一行加 0.9，上限 4.5pt；透明度 0.62 起每行减 0.10，下限 0.14。
-- 切行时整段做 0.3s easeOut 过渡（一个事务），而不是每行挂 .animation，
-  避免上一版为了性能撤掉动画后「硬切」的感觉。
-- 歌词左右各留 8pt 给模糊溢出，贴边不会被裁。
-- 版本 1.3.5（同时包含 1.3.4 的 dock 改动：内容滚到玻璃下面、选中块滑动、按住拖动切换）。
+自己手写的那条 dock 永远差一截：没有系统的选中态滑动、没有按住拖动，
+在 iOS 26 上也拿不到真正的 Liquid Glass 行为。回到 v1.1.0 的结构——
+
+- `TabView` + `.tabItem`，三个 Tab（首页 / 音乐厅 / 我的），选中色用主题红
+- iOS 26 不再覆盖 `UITabBarAppearance`（覆盖等于把系统玻璃关掉），
+  只有 iOS 16–18 才压成近黑
+- 迷你播放卡改成浮在 TabBar 上方的卡片：overlay 在底部，左右 12、底部 6；
+  滚动内容用 contentMargins 留出 74pt，可以从卡片下面滚过去
+- 搜索不再占 Tab：改成 fullScreenCover 包一层 NavigationStack 打开搜索页，
+  右上角放大镜触发，「取消」直接关掉
+- 去掉自写的 BottomChrome / FloatingTabBar / dockTabs
+- 版本 1.4.0

@@ -26,21 +26,24 @@ struct MusicHallApp: App {
         }
     }
 
-    /// 系统 TabBar / 导航栏统一压成近黑，去掉半透明毛玻璃的白边。
+    /// 导航栏统一压成近黑。TabBar 只在 iOS 26 以下才自定义——
+    /// iOS 26 的系统 TabBar 自带 Liquid Glass 和选中态滑动，覆盖外观等于把它关掉。
     private static func configureAppearance() {
-        let tabAppearance = UITabBarAppearance()
-        tabAppearance.configureWithOpaqueBackground()
-        tabAppearance.backgroundColor = UIColor(Theme.bg)
-        tabAppearance.shadowColor = UIColor.white.withAlphaComponent(0.07)
+        if #unavailable(iOS 26.0) {
+            let tabAppearance = UITabBarAppearance()
+            tabAppearance.configureWithOpaqueBackground()
+            tabAppearance.backgroundColor = UIColor(Theme.bg)
+            tabAppearance.shadowColor = UIColor.white.withAlphaComponent(0.07)
 
-        let itemAppearance = tabAppearance.stackedLayoutAppearance
-        itemAppearance.normal.iconColor = UIColor(Theme.faint)
-        itemAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(Theme.faint)]
-        itemAppearance.selected.iconColor = UIColor(Theme.text)
-        itemAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(Theme.text)]
+            let itemAppearance = tabAppearance.stackedLayoutAppearance
+            itemAppearance.normal.iconColor = UIColor(Theme.faint)
+            itemAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(Theme.faint)]
+            itemAppearance.selected.iconColor = UIColor(Theme.text)
+            itemAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(Theme.text)]
 
-        UITabBar.appearance().standardAppearance = tabAppearance
-        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+            UITabBar.appearance().standardAppearance = tabAppearance
+            UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+        }
 
         let navigationAppearance = UINavigationBarAppearance()
         navigationAppearance.configureWithOpaqueBackground()

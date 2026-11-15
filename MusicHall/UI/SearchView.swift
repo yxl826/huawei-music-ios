@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct SearchView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var player: PlayerEngine
-    @EnvironmentObject private var nav: NavState
     @EnvironmentObject private var toast: ToastCenter
 
     @State private var query = ""
@@ -100,7 +100,7 @@ struct SearchView: View {
 
             Button("取消") {
                 query = ""
-                nav.tab = nav.lastDockTab
+                dismiss()
             }
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(Theme.muted)
