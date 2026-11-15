@@ -26,6 +26,9 @@ enum AppTab: String, CaseIterable, Identifiable {
         }
     }
 
+    /// 底部 dock 里显示的 Tab。搜索不进 dock，改由页面右上角的放大镜进入。
+    static let dockTabs: [AppTab] = [.home, .hall, .library]
+
     var activeSymbol: String {
         switch self {
         case .home: return "house.fill"
@@ -73,12 +76,6 @@ struct MiniPlayerCard: View {
     var body: some View {
         if let track = player.current {
             VStack(spacing: 0) {
-                // 播放进度贴在卡片顶边，和 Apple Music 一样是一条极细的线。
-                // 单独一个观察时钟的小视图：卡片主体不跟着 2Hz 重绘。
-                MiniProgressLine()
-                    .frame(height: 2)
-                    .padding(.horizontal, 1)
-
                 HStack(spacing: 10) {
                     Cover(url: track.coverUrl, size: 44, radius: 8)
                     VStack(alignment: .leading, spacing: 1) {
@@ -114,8 +111,7 @@ struct MiniPlayerCard: View {
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 10)
-                .padding(.top, 5)
-                .padding(.bottom, 7)
+                .padding(.vertical, 8)
             }
             .frame(height: BottomChrome.miniPlayerHeight)
             .chromeGlass(radius: 19)
@@ -176,27 +172,6 @@ extension View {
     }
 }
 
-private struct MiniProgressLine: View {
-    @EnvironmentObject private var player: PlayerEngine
-    @EnvironmentObject private var clock: PlaybackClock
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Color.clear
-                Capsule()
-                    .fill(Color.white.opacity(0.9))
-                    .frame(width: max(0, geometry.size.width * progress), height: 2)
-            }
-        }
-    }
-
-    private var progress: Double {
-        guard player.duration > 0 else { return 0 }
-        return min(1, max(0, clock.position / player.duration))
-    }
-}
-
 // MARK: - 悬浮 Tab 栏
 
 struct FloatingTabBar: View {
@@ -204,7 +179,7 @@ struct FloatingTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(AppTab.allCases) { tab in
+            ForEach(AppTab.dockTabs) { tab in
                 item(tab)
             }
         }

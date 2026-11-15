@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SearchView: View {
     @EnvironmentObject private var player: PlayerEngine
+    @EnvironmentObject private var nav: NavState
     @EnvironmentObject private var toast: ToastCenter
 
     @State private var query = ""
@@ -95,6 +96,14 @@ struct SearchView: View {
             .padding(.horizontal, 11)
             .padding(.vertical, 9)
             .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+            Button("取消") {
+                query = ""
+                nav.tab = nav.lastDockTab
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Theme.muted)
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, Theme.pagePadding)
         .padding(.top, 8)
