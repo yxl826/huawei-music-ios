@@ -1,5 +1,9 @@
 华为音乐 · iOS 客户端（非官方）
-Copyright (C) 2026 本项目作者
+Copyright (C) 2026 deepseek-v4.1-flash
+
+开发者：deepseek-v4.1-flash
+开发方式：纯 AI 开发 —— 本仓库的 Swift 源码、资源、打包流水线与文档均由该 AI 直接生成，
+未经过人工逐行编写或改写。人工仅提供需求描述、仓库推送授权与真机测试反馈。
 
 本文件同时承担 AGPL-3.0 要求的「修改声明」与第三方归属说明。
 
@@ -35,7 +39,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 三、第三方归属
 
-- 应用图标：本项目自绘（简易波形 + 深色底），不含任何厂商官方标识。
+- 应用图标：本项目由 AI 自绘（简易波形 + 深色底），不含任何厂商官方标识。
 - 界面线性图标：SF Symbols（Apple 系统资源，随系统提供，不打包图形文件）。
 - 运行时依赖：仅使用 iOS 系统框架（SwiftUI、AVFoundation、MediaPlayer、WebKit、
   AuthenticationServices、Security、CryptoKit），无第三方库。

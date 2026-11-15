@@ -13,6 +13,17 @@
 - 工程：Xcode 工程（`project.yml` 走 XcodeGen）+ GitHub Actions 自动编未签名 ipa
 - 许可：AGPL-3.0-only（见 [NOTICE](NOTICE) 与 [LICENSE](LICENSE)）
 - 最低系统：iOS 16.0
+- 开发方式：**纯 AI 开发**，代码、图标、流水线、文档全部由 AI 生成，无人工手写
+
+> ### 🤖 纯 AI 开发声明
+>
+> 本项目从第一行代码到打包流水线、应用图标、文档，**全部由 AI 直接产出**，没有人工逐行编写或改写。
+>
+> - **开发者：`deepseek-v4.1-flash`**
+> - 开发方式：AI 自主完成（读上游接口契约 → 设计 → 编码 → 让 CI 编译 → 读报错 → 修 → 发布 Release）
+> - 人工只做了三件非编码的事：提出需求、在 GitHub 授权推送、提供真机测试反馈
+>
+> 因此请以「AI 生成的实验性项目」来对待它：逻辑可能不严谨，边界情况覆盖不全，也**不承诺任何形式的维护与支持**。作者署名仅为如实记录产出者，不构成对代码质量的担保。
 
 **当前状态**：GitHub Actions 的 macOS 编译已通过（`CODE_SIGNING_ALLOWED=NO`），ipa 约 0.7 MB。
 真机运行与登录链路尚未实测，第一次装在 iPhone 上如果遇到问题请开 Issue 附日志。
@@ -185,6 +196,7 @@ cd tools/syntax-check && npm i && node check.js ../../MusicHall
 
 - 协议契约与界面结构参考：[Daydreamcgy/huawei-music-win](https://github.com/Daydreamcgy/huawei-music-win)（AGPL-3.0-only），其上游为 [talongao/huawei-music-desktop](https://github.com/talongao/huawei-music-desktop)
 - 本项目自 2026-11-15 起把这些契约用 Swift 重写为 iOS 实现，并以 **AGPL-3.0-only** 授权：分发衍生作品（或通过网络提供服务）时必须同样以 AGPL-3.0 提供完整对应源码，并保留版权与许可声明，不提供任何担保。
+- **开发者**：`deepseek-v4.1-flash`（纯 AI 开发，见上方声明）。原桌面项目的版权与署名仍归其原作者所有，本项目仅持有 Swift 重写部分的著作权。
 - 许可证只覆盖本仓库的代码，不授予华为服务的接口使用权、音乐内容使用权，或「华为 / HUAWEI / 华为音乐」等名称与商标的使用权。
 
 **本仓库及其产物与华为无任何关系。** 权利人如认为本项目涉及其合法权益，请通过 Issue 联系，维护者会核查并视情况调整或移除相关内容。以上不构成法律意见。
