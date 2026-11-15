@@ -64,9 +64,34 @@ enum Normalize {
             artists: artists(json),
             album: album,
             coverUrl: cover(json),
+            lyricAddress: lyricAddress(json),
             durationSeconds: JSONValue.number(json["duration"]),
             available: true
         )
+    }
+
+    /// 歌词地址只随列表/搜索/歌单的曲目对象下发，播放解析响应里没有。
+    /// 顶层是 `lyricAddress`，contentExInfo（字符串 JSON）里是历史拼写 `lyricAddres`，
+    /// 再往下 `lyrics` 还是一层字符串 JSON，`lineByLineLyric` 才是逐行歌词。
+    static func lyricAddress(_ value: JSON) -> String? {
+        var candidates: [String?] = [
+            JSONValue.text(value["lyricAddress"]),
+            JSONValue.text(value["lyricAddres"])
+        ]
+        let direct = JSONValue.dict(value["contentExInfo"])
+        let extra = direct.isEmpty ? JSONValue.nested(value["contentExInfo"]) : direct
+        candidates.append(JSONValue.text(extra["lyricAddress"]))
+        candidates.append(JSONValue.text(extra["lyricAddres"]))
+        if let lyricsText = JSONValue.text(extra["lyrics"]),
+           let data = lyricsText.data(using: .utf8),
+           let nested = JSONValue.object(data) {
+            candidates.append(JSONValue.text(nested["lineByLineLyric"]))
+            candidates.append(JSONValue.text(nested["lyricAddress"]))
+        }
+        for candidate in candidates where SafeURL.isSafe(candidate) {
+            return candidate
+        }
+        return nil
     }
 
     static func tracks(_ value: Any?) -> [Track] {

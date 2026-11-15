@@ -16,6 +16,9 @@ struct Track: Identifiable, Hashable, Codable {
     var artists: [ArtistRef]
     var album: AlbumRef?
     var coverUrl: String?
+    /// 列表/搜索/歌单接口里随曲目一起下发的歌词地址。播放解析响应里**没有**这个字段，
+    /// 所以必须在归一化阶段存下来，否则只能退回逐首搜索。
+    var lyricAddress: String?
     var durationSeconds: Double?
     var available: Bool
 
@@ -25,6 +28,7 @@ struct Track: Identifiable, Hashable, Codable {
         artists: [ArtistRef] = [],
         album: AlbumRef? = nil,
         coverUrl: String? = nil,
+        lyricAddress: String? = nil,
         durationSeconds: Double? = nil,
         available: Bool = true
     ) {
@@ -33,6 +37,7 @@ struct Track: Identifiable, Hashable, Codable {
         self.artists = artists
         self.album = album
         self.coverUrl = coverUrl
+        self.lyricAddress = lyricAddress
         self.durationSeconds = durationSeconds
         self.available = available
     }

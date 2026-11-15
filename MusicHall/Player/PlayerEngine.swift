@@ -325,10 +325,10 @@ final class PlayerEngine: ObservableObject {
         isLoadingLyrics = true
         lyricsNote = ""
         Task {
-            let document = try? await LyricsService.load(trackId: track.id)
+            let document = await LyricsService.load(track: track)
             guard mine == lyricsGeneration else { return }
             isLoadingLyrics = false
-            if let document { lyrics = document }
+            lyrics = document
             if lyrics.lines.isEmpty { lyricsNote = LyricsService.lastDiagnostic }
         }
     }

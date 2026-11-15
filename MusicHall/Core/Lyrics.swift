@@ -45,6 +45,9 @@ enum LyricsParser {
             let bodyStart = last.range.location + last.range.length
             let body = suffix(line, from: bodyStart).trimmingCharacters(in: .whitespacesAndNewlines)
             let bodyText = stripWordMarks(body)
+            // 华为的逐行歌词用「只有时间戳、没有正文」的空行标记上一句结束，
+            // 这些行留着会在页面上变成一串空行，直接丢掉。
+            if bodyText.isEmpty { continue }
 
             for stamp in stamps {
                 guard stamp.captures.count >= 3,
@@ -151,7 +154,8 @@ enum LyricsParser {
     }
 }
 
-/// 歌词来源优先用曲目响应里的地址，其次用内嵌文本；都拿不到就诚实返回空。
+/// 歌词来源按可靠性排序：曲目对象自带地址 → 播放解析响应 → 按歌名搜索精确匹配。
+/// 三处都拿不到时返回空文档，并在 `lastDiagnostic` 里写清每一层为什么失败。
 enum LyricsService {
     private static var cache: [String: LyricsDoc] = [:]
     private static let cacheLimit = 60
@@ -172,58 +176,52 @@ enum LyricsService {
         lastDiagnostic = ""
     }
 
-    static func load(trackId: String) async throws -> LyricsDoc {
-        if let hit = cache[trackId] { return hit }
+    static func load(track: Track) async -> LyricsDoc {
+        if let hit = cache[track.id] { return hit }
 
-        var response: JSON
-        do {
-            response = try await MusicAPI.shared.playbackResponse(trackId: trackId, quality: .standard)
-        } catch let standardError {
-            // 少数曲目只在无损解析的响应里带歌词地址，标准音质失败时再试一次。
-            do {
-                response = try await MusicAPI.shared.playbackResponse(trackId: trackId, quality: .lossless)
-            } catch {
-                lastDiagnostic = "解析播放地址失败：\(standardError.readableMessage)"
-                throw standardError
-            }
+        var notes: [String] = []
+
+        // 1. 列表/搜索/歌单随曲目下发的地址，命中率最高。
+        if let address = track.lyricAddress {
+            let (document, note) = await document(from: address)
+            if let document { return finish(track.id, document) }
+            notes.append("曲目自带地址：\(note)")
         }
 
-        if let address = lyricAddress(response) {
-            if let url = SafeURL.url(address) {
-                do {
-                    let raw = try await Transport.boundedText(from: url)
-                    let document = LyricsParser.parse(raw)
-                    if !document.lines.isEmpty {
-                        store(trackId, document)
-                        lastDiagnostic = ""
-                        return document
-                    }
-                    lastDiagnostic = "歌词文件解析后为空（\(raw.count) 字）"
-                } catch {
-                    lastDiagnostic = "歌词下载失败：\(error.readableMessage)"
-                }
-            } else if let host = URL(string: address)?.host {
-                lastDiagnostic = "歌词地址不在可信域名：\(host)"
-            } else {
-                lastDiagnostic = "歌词地址不是合法 URL"
-            }
-        } else {
-            lastDiagnostic = "响应里没有歌词地址"
-        }
-
-        if let inline = inlineLyrics(response) {
+        // 2. 播放解析响应：少数曲目只在这里带地址或内嵌歌词。
+        let response = try? await MusicAPI.shared.playbackResponse(trackId: track.id, quality: .standard)
+        if let response, let address = addressInResponse(response) {
+            let (document, note) = await document(from: address)
+            if let document { return finish(track.id, document) }
+            notes.append("播放响应地址：\(note)")
+        } else if let response, let inline = inlineLyrics(response) {
             let document = LyricsParser.parse(inline)
-            if !document.lines.isEmpty {
-                store(trackId, document)
-                lastDiagnostic = ""
-                return document
-            }
-            lastDiagnostic += "；内嵌歌词解析为空"
+            if !document.lines.isEmpty { return finish(track.id, document) }
+            notes.append("播放响应内嵌歌词解析为空")
+        } else {
+            notes.append("播放响应里没有歌词地址")
         }
 
+        // 3. 兜底：按「歌名 歌手」搜一次，只有 contentID 完全一致才采用，
+        //    避免把翻唱或同名 Live 版的歌词套到当前曲目上。
+        if let address = await searchedAddress(for: track) {
+            let (document, note) = await document(from: address)
+            if let document { return finish(track.id, document) }
+            notes.append("搜索结果地址：\(note)")
+        } else {
+            notes.append("按歌名搜索没有匹配到同一首歌")
+        }
+
+        lastDiagnostic = notes.joined(separator: "；")
         let empty = LyricsDoc.empty
-        store(trackId, empty)
+        store(track.id, empty)
         return empty
+    }
+
+    private static func finish(_ trackId: String, _ document: LyricsDoc) -> LyricsDoc {
+        store(trackId, document)
+        lastDiagnostic = ""
+        return document
     }
 
     private static func store(_ trackId: String, _ document: LyricsDoc) {
@@ -231,12 +229,41 @@ enum LyricsService {
         cache[trackId] = document
     }
 
+    /// 下载并解析一个歌词地址；失败时返回 (nil, 原因)。
+    private static func document(from address: String) async -> (LyricsDoc?, String) {
+        guard let url = SafeURL.url(address) else {
+            let host = URL(string: address)?.host ?? String(address.prefix(40))
+            return (nil, "地址不可信（\(host)）")
+        }
+        do {
+            let raw = try await Transport.boundedText(from: url)
+            let document = LyricsParser.parse(raw)
+            if document.lines.isEmpty {
+                return (nil, "文件解析后为空（\(raw.count) 字）")
+            }
+            return (document, "")
+        } catch {
+            return (nil, "下载失败：\(error.readableMessage)")
+        }
+    }
+
+    private static func searchedAddress(for track: Track) async -> String? {
+        let query = "\(track.title) \(track.artists.first?.name ?? "")"
+            .trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return nil }
+        guard let page = try? await MusicAPI.shared.search(query: query, start: 0, limit: 10) else {
+            return nil
+        }
+        return page.tracks.first { $0.id == track.id && $0.lyricAddress != nil }?.lyricAddress
+    }
+
     private static func extraInfo(_ response: JSON) -> JSON {
         let direct = JSONValue.dict(response["contentExInfo"])
         return direct.isEmpty ? JSONValue.nested(response["contentExInfo"]) : direct
     }
 
-    private static func lyricAddress(_ response: JSON) -> String? {
+    /// 播放解析响应里若出现歌词地址，按同样的若干拼写找一遍。
+    private static func addressInResponse(_ response: JSON) -> String? {
         let extra = extraInfo(response)
         let lyrics = JSONValue.dict(extra["lyrics"])
         let candidates = [
@@ -245,8 +272,8 @@ enum LyricsService {
             lyrics["lyricAddress"], lyrics["lineByLineLyric"],
             JSONValue.dict(response["lyrics"])["lineByLineLyric"]
         ]
-        for candidate in candidates {
-            if let text = JSONValue.text(candidate), SafeURL.isSafe(text) { return text }
+        for candidate in candidates where SafeURL.isSafe(JSONValue.text(candidate)) {
+            return JSONValue.text(candidate)
         }
         return nil
     }
