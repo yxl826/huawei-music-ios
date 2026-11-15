@@ -31,23 +31,24 @@ struct PlayerView: View {
             // 参考 Apple 文档《Adding a background to your view》里「Extend the background into the safe areas」。
             ArtworkBackdrop(url: player.current?.coverUrl)
 
-            GeometryReader { geometry in
-                let width = geometry.size.width
-                Group {
-                    if let track = player.current {
-                        content(track, width: width)
-                    } else {
-                        EmptyHint(
-                            title: "还没有在播放的歌",
-                            detail: "从收藏、歌单或搜索里点一首开始。",
-                            systemImage: "play.circle"
-                        )
-                        .padding(.horizontal, 30)
-                    }
+            // 宽度直接取窗口宽度并钉死：不经过 GeometryReader 的提案，
+            // 就没有「子视图撑宽容器 → 拿到偏大的宽度 → 整页居中裁掉」这条链。
+            let width = Layout.screenWidth
+            Group {
+                if let track = player.current {
+                    content(track, width: width)
+                } else {
+                    EmptyHint(
+                        title: "还没有在播放的歌",
+                        detail: "从收藏、歌单或搜索里点一首开始。",
+                        systemImage: "play.circle"
+                    )
+                    .padding(.horizontal, 30)
+                    .frame(width: width)
                 }
-                .frame(width: width, height: geometry.size.height)
-                .clipped()
             }
+            .frame(width: width)
+            .clipped()
         }
         .preferredColorScheme(.dark)
         .offset(y: dragOffset)

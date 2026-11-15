@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 设计令牌：与桌面版保持同一套颜色关系（近黑底 + 一个红心色，颜色只留给封面）。
 enum Theme {
@@ -20,6 +21,27 @@ enum Theme {
     static let radiusSM: CGFloat = 7
 
     static let pagePadding: CGFloat = 18
+}
+
+/// 窗口尺寸：只从这里取，不让布局系统「推导」。
+/// 播放页的宽度必须钉死在这个值上——用 GeometryReader 取父级提案时，
+/// 只要某个子视图把容器撑宽，拿到的宽度就是错的，整页会被居中裁掉。
+@MainActor
+enum Layout {
+    static var window: UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.flatMap(\.windows).first { $0.isKeyWindow } ?? scenes.first?.windows.first
+    }
+
+    static var screenWidth: CGFloat {
+        let bounds = window?.bounds ?? UIScreen.main.bounds
+        return bounds.width > 0 ? bounds.width : 393
+    }
+
+    static var screenHeight: CGFloat {
+        let bounds = window?.bounds ?? UIScreen.main.bounds
+        return bounds.height > 0 ? bounds.height : 852
+    }
 }
 
 extension Color {
@@ -60,10 +82,9 @@ struct ChromeGlass: ViewModifier {
     func body(content: Content) -> some View {
         #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
-            content.glassEffect(
-                .regular.tint(Color.white.opacity(0.10)),
-                in: RoundedRectangle(cornerRadius: radius, style: .continuous)
-            )
+            // 这里**不加 .tint()**：给 Glass 挂一个近透明的 tint 会让整块玻璃
+            // 看起来像「没有效果」。第一版用的就是不带 tint 的 .regular，观感是对的。
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
         } else {
             fallback(content)
         }
@@ -80,7 +101,7 @@ struct ChromeGlass: ViewModifier {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .fill(.ultraThinMaterial)
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .fill(Color(hex: 0x1A1A20).opacity(0.86))
+                        .fill(Color(hex: 0x1C1C23).opacity(0.55))
                 }
             }
             .overlay {
@@ -88,9 +109,9 @@ struct ChromeGlass: ViewModifier {
                     .strokeBorder(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.26),
-                                Color.white.opacity(0.04),
-                                Color.white.opacity(0.14)
+                                Color.white.opacity(0.24),
+                                Color.white.opacity(0.05),
+                                Color.white.opacity(0.13)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -98,7 +119,7 @@ struct ChromeGlass: ViewModifier {
                         lineWidth: 1
                     )
             }
-            .shadow(color: Color.black.opacity(0.45), radius: 24, y: 10)
+            .shadow(color: Color.black.opacity(0.42), radius: 22, y: 10)
     }
 }
 
