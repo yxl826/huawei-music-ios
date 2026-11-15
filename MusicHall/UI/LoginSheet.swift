@@ -28,7 +28,7 @@ final class LoginModel: ObservableObject {
     /// 返回 true 表示这次导航已被本层处理（回调或需要拦截）。
     func handle(_ url: URL) -> Bool {
         if handled { return true }
-        guard OAuth.isCallback(url, attempt) else { return false }
+        guard OAuth.isCallback(url, attempt: attempt) else { return false }
         handled = true
         do {
             let code = try OAuth.consumeCallback(url, attempt: attempt)

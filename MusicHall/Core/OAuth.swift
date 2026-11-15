@@ -75,7 +75,7 @@ enum OAuth {
         guard !attempt.consumed else { throw APIError.invalid("授权回调已使用") }
         let age = Date().timeIntervalSince(attempt.createdAt)
         guard age >= 0, age <= attemptLifetime else { throw APIError.invalid("授权尝试已过期，请重新登录") }
-        guard isCallback(url, attempt) else { throw APIError.invalid("回调地址不匹配") }
+        guard isCallback(url, attempt: attempt) else { throw APIError.invalid("回调地址不匹配") }
 
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let items = components?.queryItems ?? []

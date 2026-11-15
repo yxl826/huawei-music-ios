@@ -172,7 +172,7 @@ final class PlayerEngine: ObservableObject {
             player.replaceCurrentItem(with: nil)
             isPlaying = false
             isBuffering = false
-            position = 0
+            self.position = 0
             duration = 0
             lyrics = .empty
             updateNowPlaying()
