@@ -1,0 +1,76 @@
+name: build-ios-ipa
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unsigned-ipa:
+    name: 编译未签名 ipa
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 显示工具链版本
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成工程
+        run: xcodegen generate
+
+      - name: 编译（不开签名）
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project MusicHall.xcodeproj \
+            -scheme MusicHall \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: 打包成 ipa
+        run: |
+          APP_PATH="build/Build/Products/Release-iphoneos/MusicHall.app"
+          test -d "$APP_PATH"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist"
+          rm -rf out && mkdir -p out/Payload
+          cp -R "$APP_PATH" out/Payload/
+          cd out
+          zip -qry ../MusicHall-unsigned.ipa Payload
+          cd ..
+          ls -lh MusicHall-unsigned.ipa
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: MusicHall-unsigned-ipa
+          path: MusicHall-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 打 tag 时附到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MusicHall-unsigned.ipa
+          body: |
+            未签名 ipa，需要用 Sideloadly / AltStore / TrollStore 之类自行签名后安装。
+
+            非官方客户端，与华为及其关联公司无隶属或合作关系，不提供任何音源，只播放你自己账号里已有权益的内容。

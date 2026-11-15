@@ -1,0 +1,40 @@
+name: MusicHall
+options:
+  bundleIdPrefix: com.unofficial
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  minimumXcodeGenVersion: "2.38.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CLANG_ENABLE_MODULES: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  MusicHall:
+    type: application
+    platform: iOS
+    sources:
+      - path: MusicHall
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.unofficial.musichall
+        PRODUCT_NAME: MusicHall
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Config/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_EMIT_LOC_STRINGS: YES
+schemes:
+  MusicHall:
+    build:
+      targets:
+        MusicHall: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,12 @@
+{
+  "name": "musichall-syntax-check",
+  "private": true,
+  "description": "在没有 Xcode 的机器上校验 Swift 语法（tree-sitter）",
+  "scripts": {
+    "check": "node check.js ../../MusicHall"
+  },
+  "dependencies": {
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "0.20.8"
+  }
+}

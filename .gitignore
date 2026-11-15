@@ -1,0 +1,13 @@
+.DS_Store
+build/
+DerivedData/
+out/
+*.ipa
+*.xcuserstate
+xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+.swiftpm/
+.env
+node_modules/
+package-lock.json

@@ -1,0 +1,46 @@
+华为音乐 · iOS 客户端（非官方）
+Copyright (C) 2026 本项目作者
+
+本文件同时承担 AGPL-3.0 要求的「修改声明」与第三方归属说明。
+
+一、来源与本项目的修改（AGPL-3.0 §5(a)）
+
+本项目的协议层设计（登录流程、Digest 请求头、各业务接口的参数形状、错误判定、
+收藏分页与去重口径、歌词地址解析、音质确认规则）来自上游项目：
+
+  https://github.com/Daydreamcgy/huawei-music-win        （AGPL-3.0-only）
+  https://github.com/talongao/huawei-music-desktop       （AGPL-3.0-only，更上游）
+
+原项目版权归其作者所有。本项目自 2026-11-15 起，把上述协议契约与界面结构
+改写为 iOS 实现：SwiftUI + AVPlayer + WKWebView 登录，重写全部界面与交互
+（手机单列布局、底部播放条、播放页封面 + 歌词、播放队列）。
+
+本项目不是上游项目的官方分支，也不代表上游作者的立场或认可。
+本仓库不包含上游的任何源代码文件，只包含依据其公开文档与接口契约重新编写的 Swift 代码。
+
+二、许可
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along with this program.
+If not, see <https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: AGPL-3.0-only
+
+三、第三方归属
+
+- 应用图标：本项目自绘（简易波形 + 深色底），不含任何厂商官方标识。
+- 界面线性图标：SF Symbols（Apple 系统资源，随系统提供，不打包图形文件）。
+- 运行时依赖：仅使用 iOS 系统框架（SwiftUI、AVFoundation、MediaPlayer、WebKit、
+  AuthenticationServices、Security、CryptoKit），无第三方库。
+
+四、边界
+
+代码许可不代表获得华为服务、接口、商标或音乐内容的任何许可。
+本项目不提供音源、不下载、不破解、不绕过付费/会员/地域/DRM 限制。
