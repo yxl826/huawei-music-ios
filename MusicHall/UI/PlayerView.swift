@@ -40,6 +40,10 @@ struct PlayerView: View {
                 .padding(.horizontal, 30)
             }
         }
+        // 页面宽度必须钉死在屏幕上：任何一行超长歌词一旦把内容撑宽，
+        // 外层的顶栏 HStack 也会跟着变宽，左右两个玻璃圆钮就被顶出屏幕（表现为「退不出去」）。
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .preferredColorScheme(.dark)
         .offset(y: dragOffset)
         .sheet(isPresented: $nav.showQueue) {
@@ -83,6 +87,22 @@ struct PlayerView: View {
         }
         .padding(.top, 2)
         .padding(.bottom, 8)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 16)
+                .onChanged { value in
+                    dragOffset = max(0, value.translation.height * 0.6)
+                }
+                .onEnded { value in
+                    if value.translation.height > 90 {
+                        dismiss()
+                    } else {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+                            dragOffset = 0
+                        }
+                    }
+                }
+        )
     }
 
     private func qualityLine(_ track: Track) -> String {
@@ -333,61 +353,76 @@ private struct LyricsPane: View {
     let activeIndex: Int
     let onSeek: (Double) -> Void
 
+    /// 手动滑动歌词后短暂停止自动跟随，否则手指还没松就开始被拽回当前行。
+    @State private var manualScrollingUntil: Date = .distantPast
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-                    Color.clear.frame(height: 46)
-                    ForEach(lines.indices, id: \.self) { index in
-                        row(index)
+        // 宽度必须由容器给出。交给 ScrollView 自己算的话，某些超长行会把
+        // 内容宽度撑到屏幕之外，整页跟着变宽、左右被裁掉（顶栏按钮也会被顶出去）。
+        GeometryReader { geometry in
+            let contentWidth = max(0, geometry.size.width - 12)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Color.clear.frame(height: 46)
+                        ForEach(lines.indices, id: \.self) { index in
+                            row(index, width: contentWidth)
+                        }
+                        Color.clear.frame(height: 96)
                     }
-                    Color.clear.frame(height: 96)
+                    .frame(width: contentWidth, alignment: .leading)
+                    .padding(.horizontal, 6)
                 }
-                .padding(.horizontal, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .mask(
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .black, location: 0.10),
-                        .init(color: .black, location: 0.88),
-                        .init(color: .clear, location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black, location: 0.10),
+                            .init(color: .black, location: 0.88),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 )
-            )
-            .onChange(of: activeIndex) { value in
-                guard value >= 0 else { return }
-                withAnimation(.spring(response: 0.52, dampingFraction: 0.86)) {
-                    proxy.scrollTo(value, anchor: .center)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 6)
+                        .onChanged { _ in
+                            manualScrollingUntil = Date().addingTimeInterval(2.5)
+                        }
+                )
+                .onChange(of: activeIndex) { value in
+                    guard value >= 0, Date() >= manualScrollingUntil else { return }
+                    withAnimation(.spring(response: 0.52, dampingFraction: 0.86)) {
+                        proxy.scrollTo(value, anchor: .center)
+                    }
+                }
+                .onAppear {
+                    guard activeIndex > 0 else { return }
+                    proxy.scrollTo(activeIndex, anchor: .center)
                 }
             }
-            .onAppear {
-                guard activeIndex > 0 else { return }
-                proxy.scrollTo(activeIndex, anchor: .center)
-            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
     }
 
-    private func row(_ index: Int) -> some View {
+    private func row(_ index: Int, width: CGFloat) -> some View {
         let line = lines[index]
         let isActive = index == activeIndex
         return VStack(alignment: .leading, spacing: 5) {
             Text(line.text.isEmpty ? " " : line.text)
-                .font(.system(size: isActive ? 27 : 23, weight: isActive ? .bold : .semibold))
+                .font(.system(size: isActive ? 26 : 22, weight: isActive ? .bold : .semibold))
                 .foregroundStyle(isActive ? Color.white : Color.white.opacity(0.38))
                 .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
             if let translation = line.translation, !translation.isEmpty {
                 Text(translation)
                     .font(.system(size: isActive ? 15 : 14, weight: .medium))
                     .foregroundStyle(Color.white.opacity(isActive ? 0.7 : 0.28))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(width: width, alignment: .leading)
         .id(index)
         .contentShape(Rectangle())
         .onTapGesture {
