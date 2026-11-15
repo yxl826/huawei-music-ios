@@ -31,8 +31,9 @@ jobs:
         run: xcodegen generate
 
       - name: 编译（不开签名）
+        id: build
         run: |
-          set -o pipefail
+          set +e
           xcodebuild \
             -project MusicHall.xcodeproj \
             -scheme MusicHall \
@@ -43,7 +44,27 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build
+            build 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            # 把每一条编译器报错转成 annotation：这样即使没有仓库权限也能在
+            # checks/annotations 接口里读到「文件:行: 具体错误」。
+            grep -aE "(fatal error|error): " build.log | head -40 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//$'\r'/}"
+            done
+            echo "===== 日志尾部 60 行 ====="
+            tail -n 60 build.log
+          fi
+          exit "$status"
+
+      - name: 保存编译日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: 打包成 ipa
         run: |
