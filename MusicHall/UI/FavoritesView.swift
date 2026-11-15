@@ -40,6 +40,7 @@ struct FavoritesView: View {
             .padding(.horizontal, Theme.pagePadding)
             .padding(.bottom, 24)
         }
+        .chromeScrollMargin()
         .background(Theme.bg)
         .navigationTitle("我的收藏")
         .navigationBarTitleDisplayMode(.inline)

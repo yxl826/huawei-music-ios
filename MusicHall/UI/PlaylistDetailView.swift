@@ -47,6 +47,7 @@ struct PlaylistDetailView: View {
             .padding(.horizontal, Theme.pagePadding)
             .padding(.bottom, 24)
         }
+        .chromeScrollMargin()
         .background(Theme.bg)
         .navigationTitle(playlist.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -148,6 +149,7 @@ struct HistoryView: View {
             .padding(.horizontal, Theme.pagePadding)
             .padding(.bottom, 24)
         }
+        .chromeScrollMargin()
         .background(Theme.bg)
         .navigationTitle("播放历史")
         .navigationBarTitleDisplayMode(.inline)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum AppTab: String, CaseIterable, Identifiable {
     case home
@@ -153,21 +154,29 @@ struct TopActionBar: View {
 
 // MARK: - 页面底部留白
 
-private struct ChromeInset: View {
-    @EnvironmentObject private var player: PlayerEngine
-
-    var body: some View {
-        Color.clear
-            .frame(height: BottomChrome.insetHeight(hasTrack: player.current != nil))
+extension View {
+    /// 给滚动内容加底部留白，而不是把滚动视图整个缩短。
+    ///
+    /// 两者的区别很关键：用 safeAreaInset 时内容停在悬浮层上方，玻璃底下永远是
+    /// 一片纯色，看着就像「没有玻璃」；改成 contentMargins 后内容会从玻璃下面滚过去，
+    /// 玻璃才有东西可以模糊/折射——这也是 Apple Music 那条 dock 的观感来源。
+    func chromeScrollMargin() -> some View {
+        modifier(ChromeScrollMargin())
     }
 }
 
-extension View {
-    /// 每个 Tab 的内容用它给悬浮层让位：内容会从玻璃下方滚过去，
-    /// 但最后一行不会被挡住。
-    func bottomChromeInset() -> some View {
-        safeAreaInset(edge: .bottom, spacing: 0) {
-            ChromeInset()
+private struct ChromeScrollMargin: ViewModifier {
+    @EnvironmentObject private var player: PlayerEngine
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let height = BottomChrome.insetHeight(hasTrack: player.current != nil)
+        if #available(iOS 17.0, *) {
+            content.contentMargins(.bottom, height, for: .scrollContent)
+        } else {
+            content.safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear.frame(height: height)
+            }
         }
     }
 }
@@ -177,13 +186,30 @@ extension View {
 struct FloatingTabBar: View {
     @Binding var selection: AppTab
 
+    @Namespace private var pill
+
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(AppTab.dockTabs) { tab in
-                item(tab)
+        GeometryReader { geometry in
+            let count = max(1, AppTab.dockTabs.count)
+            let itemWidth = (geometry.size.width - 12) / CGFloat(count)
+
+            HStack(spacing: 0) {
+                ForEach(AppTab.dockTabs) { tab in
+                    item(tab)
+                }
             }
+            .padding(.horizontal, 6)
+            .contentShape(Rectangle())
+            // 按住横向拖动即可切换（松手前就跟着走），和 iOS 26 那条 dock 的手感一致。
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let index = Int((value.location.x - 6) / max(1, itemWidth))
+                        guard index >= 0, index < AppTab.dockTabs.count else { return }
+                        select(AppTab.dockTabs[index])
+                    }
+            )
         }
-        .padding(.horizontal, 6)
         .frame(height: BottomChrome.tabBarHeight)
         .chromeGlass(radius: BottomChrome.tabBarHeight / 2)
     }
@@ -191,15 +217,17 @@ struct FloatingTabBar: View {
     private func item(_ tab: AppTab) -> some View {
         let isSelected = selection == tab
         return Button {
-            guard selection != tab else { return }
-            selection = tab
+            select(tab)
         } label: {
             VStack(spacing: 4) {
                 ZStack {
-                    // 选中项的图标底下垫一块浅色块，对应 Apple Music 那种选中态。
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(isSelected ? Theme.like.opacity(0.20) : Color.clear)
-                        .frame(width: 48, height: 30)
+                    // 选中态是一块会在项之间滑动的高亮，而不是每项各画一块。
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Theme.like.opacity(0.20))
+                            .frame(width: 48, height: 30)
+                            .matchedGeometryEffect(id: "selection", in: pill)
+                    }
                     Image(systemName: isSelected ? tab.activeSymbol : tab.symbol)
                         .font(.system(size: 20, weight: .medium))
                 }
@@ -212,5 +240,13 @@ struct FloatingTabBar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func select(_ tab: AppTab) {
+        guard selection != tab else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            selection = tab
+        }
     }
 }

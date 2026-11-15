@@ -51,6 +51,7 @@ struct SearchView: View {
             .padding(.horizontal, Theme.pagePadding)
             .padding(.bottom, 24)
         }
+        .chromeScrollMargin()
         .background(Theme.bg)
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .top, spacing: 0) { searchBar }

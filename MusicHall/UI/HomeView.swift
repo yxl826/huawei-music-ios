@@ -33,6 +33,7 @@ struct HomeView: View {
             .padding(.top, 10)
             .padding(.bottom, 26)
         }
+        .chromeScrollMargin()
         .background(Theme.bg)
         .scrollIndicators(.hidden)
         .refreshable { await load() }

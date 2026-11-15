@@ -45,6 +45,7 @@ struct LibraryView: View {
             .padding(.top, 10)
             .padding(.bottom, 26)
         }
+        .chromeScrollMargin()
         .background(Theme.bg)
         .scrollIndicators(.hidden)
         .overlay(alignment: .topTrailing) {
@@ -277,6 +278,7 @@ struct SettingsView: View {
             .padding(.horizontal, Theme.pagePadding)
             .padding(.vertical, 14)
         }
+        .chromeScrollMargin()
         .background(Theme.bg)
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)

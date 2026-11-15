@@ -82,6 +82,7 @@ struct HallView: View {
             .padding(.top, 10)
             .padding(.bottom, 26)
         }
+        .chromeScrollMargin()
         .background(Theme.bg)
         .scrollIndicators(.hidden)
         .overlay(alignment: .topTrailing) {
@@ -203,6 +204,7 @@ struct PlaylistsView: View {
             .padding(.horizontal, Theme.pagePadding)
             .padding(.vertical, 12)
         }
+        .chromeScrollMargin()
         .background(Theme.bg)
         .navigationTitle("我的歌单")
         .navigationBarTitleDisplayMode(.inline)

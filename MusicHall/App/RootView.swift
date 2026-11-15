@@ -13,7 +13,6 @@ struct RootView: View {
                 NavigationStack {
                     HomeView()
                 }
-                .bottomChromeInset()
                 .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label(AppTab.home.title, systemImage: AppTab.home.activeSymbol)
@@ -23,7 +22,6 @@ struct RootView: View {
                 NavigationStack {
                     HallView()
                 }
-                .bottomChromeInset()
                 .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label(AppTab.hall.title, systemImage: AppTab.hall.activeSymbol)
@@ -33,7 +31,6 @@ struct RootView: View {
                 NavigationStack {
                     SearchView()
                 }
-                .bottomChromeInset()
                 .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label(AppTab.search.title, systemImage: AppTab.search.symbol)
@@ -43,7 +40,6 @@ struct RootView: View {
                 NavigationStack {
                     LibraryView()
                 }
-                .bottomChromeInset()
                 .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label(AppTab.library.title, systemImage: AppTab.library.activeSymbol)
