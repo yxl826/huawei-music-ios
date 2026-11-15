@@ -358,7 +358,8 @@ private struct LyricsSection: View {
 
     private func sync() {
         let index = LyricsParser.activeIndex(lines, positionMs: clock.position * 1000)
-        if index != activeIndex {
+        guard index != activeIndex else { return }
+        withAnimation(.easeOut(duration: 0.3)) {
             activeIndex = index
         }
     }
@@ -420,6 +421,8 @@ private struct LyricsPane: View {
                     }
                     Color.clear.frame(height: 140)
                 }
+                // 左右各留 8pt：高斯模糊会向外溢出，不留空间的话贴边那一列会被裁掉。
+                .padding(.horizontal, 8)
                 .frame(width: width, alignment: .leading)
             }
             .frame(width: width)
@@ -458,30 +461,32 @@ private struct LyricsPane: View {
     private func row(_ index: Int) -> some View {
         let line = lines[index]
         let isActive = index == activeIndex
-        let distance = abs(index - activeIndex)
-        let opacity: Double = {
-            guard activeIndex >= 0 else { return 0.55 }
-            if isActive { return 1 }
-            // 离当前行越远越淡，接近 Apple Music 那种「聚光」感。
-            return max(0.16, 0.60 - Double(distance) * 0.11)
-        }()
+        let rowWidth = max(0, width - 16)
+        let distance = activeIndex >= 0 ? abs(index - activeIndex) : 99
+
+        // Apple Music 的做法：当前行清晰加粗，上下相邻的行按距离递增高斯模糊、同时变淡，
+        // 切行时整体做一次过渡，看起来像焦点在歌词上移动。
+        let opacity: Double = isActive ? 1 : max(0.14, 0.62 - Double(distance) * 0.10)
+        let blur: CGFloat = isActive ? 0 : min(4.5, CGFloat(distance) * 0.9)
 
         return VStack(alignment: .leading, spacing: 4) {
             Text(line.text)
                 .font(.system(size: isActive ? 25 : 21, weight: isActive ? .bold : .regular))
                 .foregroundStyle(Color.white.opacity(opacity))
+                .blur(radius: blur)
                 .lineSpacing(3)
                 .multilineTextAlignment(.leading)
-                .frame(width: width, alignment: .leading)
+                .frame(width: rowWidth, alignment: .leading)
             if let translation = line.translation, !translation.isEmpty {
                 Text(translation)
                     .font(.system(size: isActive ? 15 : 14, weight: .medium))
                     .foregroundStyle(Color.white.opacity(isActive ? 0.7 : 0.28))
+                    .blur(radius: blur * 0.6)
                     .multilineTextAlignment(.leading)
-                    .frame(width: width, alignment: .leading)
+                    .frame(width: rowWidth, alignment: .leading)
             }
         }
-        .frame(width: width, alignment: .leading)
+        .frame(width: rowWidth, alignment: .leading)
         .id(index)
         .contentShape(Rectangle())
         .onTapGesture {
