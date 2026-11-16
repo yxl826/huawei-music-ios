@@ -128,8 +128,16 @@ final class PlayerEngine: ObservableObject {
     private var cachedArtwork: (url: String, artwork: MPMediaItemArtwork)?
     /// 锁屏 / 通知中心的歌词卡片。系统的播控组件只画固定的那几个字段，
     /// 歌词只能用 Live Activity 送出去（见 Shared/LyricsActivityAttributes.swift）。
-    @available(iOS 16.1, *)
-    private var lyricsActivity: Activity<LyricsActivityAttributes>?
+    ///
+    /// 部署目标是 iOS 16.0，而 Activity 类型 16.1 才有，"stored property 不能标 @available"，
+    /// 所以用一个不透明的槽位转存，取值时再转回来。
+    private var lyricsActivitySlot: AnyObject?
+
+    @available(iOS 16.2, *)
+    private var lyricsActivity: Activity<LyricsActivityAttributes>? {
+        get { lyricsActivitySlot as? Activity<LyricsActivityAttributes> }
+        set { lyricsActivitySlot = newValue }
+    }
     /// 上次下发给卡片的那一句和播放状态：只在这两个变了的时候才更新。
     private var activityLine = -1
     private var activityPlaying = false
@@ -767,7 +775,7 @@ final class PlayerEngine: ObservableObject {
         guard isPlaying || lyricsActivity != nil else { return }
 
         let lines = lyrics.lines
-        let index = lines.isEmpty ? -1 : LyricsParser.activeIndex(lines: lines, positionMs: lyricTime() * 1000)
+        let index = lines.isEmpty ? -1 : LyricsParser.activeIndex(lines, positionMs: lyricTime() * 1000)
         let currentLine = (index >= 0 && index < lines.count) ? lines[index].text : (lines.first?.text ?? "")
         guard force || index != activityLine || isPlaying != activityPlaying else { return }
         activityLine = index
