@@ -343,6 +343,7 @@ struct PlayerView: View {
 
 private struct LyricsSection: View {
     @EnvironmentObject private var clock: PlaybackClock
+    @EnvironmentObject private var player: PlayerEngine
 
     let lines: [LyricsLine]
     let width: CGFloat
@@ -365,7 +366,7 @@ private struct LyricsSection: View {
     }
 
     private func sync() {
-        let index = LyricsParser.activeIndex(lines, positionMs: clock.live() * 1000)
+        let index = LyricsParser.activeIndex(lines, positionMs: player.lyricTime() * 1000)
         guard index != activeIndex else { return }
         // 行的字号/缩放由各行自己的弹簧驱动，容器滚动另有更松的弹簧；
         // 不在这里统一开动画，「弹」的层次才出得来。
@@ -384,7 +385,7 @@ private struct ProgressSection: View {
                 player.seek(to: player.duration * fraction)
             }
             // 数据 2Hz，用一段和回调间隔等长的线性动画补成匀速前进。
-            .animation(.linear(duration: 0.5), value: clock.position)
+            .animation(.linear(duration: 0.25), value: clock.position)
 
             HStack {
                 Text(Self.label(clock.position))
@@ -566,10 +567,10 @@ private struct KaraokeLine: View {
                 // 跟着屏幕刷新走（最低 30fps），位置用 clock.live() 外推：
                 // 进度回调只有 2Hz，不外推的话走词每 0.5 秒才挪一次，怎么刷都生硬。
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                    content(at: clock.live(now: context.date))
+                    content(at: player.lyricTime(now: context.date))
                 }
             } else {
-                content(at: clock.live())
+                content(at: player.lyricTime())
             }
         }
         // 字重保持一致：bold/regular 之间无法插值，切到当前行时会「啪」地换一次字形，

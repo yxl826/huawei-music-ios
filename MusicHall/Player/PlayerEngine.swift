@@ -45,8 +45,15 @@ final class PlaybackClock: ObservableObject {
     func live(now: Date = .now) -> Double {
         guard running else { return position }
         let drift = now.timeIntervalSince(stamp)
-        return position + min(max(drift, 0), 0.6)
+        // 只补到下个回调之前：补太多就成了「提前」，歌词会跑到声音前面去。
+        return position + min(max(drift, 0), 0.3)
     }
+}
+
+/// 音频从解码到真正出声有一段固定延迟，而媒体时间不含这段。
+/// 直接用媒体时间算歌词，看到的永远比听到的早一点点——这里统一补回来。
+enum LyricTiming {
+    static let outputLatency: Double = 0.15
 }
 
 /// 播放内核：一个 AVPlayer + 队列 + 单曲解析。
@@ -76,6 +83,8 @@ final class PlayerEngine: ObservableObject {
     }
     /// 由外部（设置页）灌入，切歌时读取。
     var quality: Quality = .standard
+    /// 用户在设置里微调的歌词偏移（秒）。正值表示把歌词往后推。
+    var lyricOffset: Double = 0
     var syncHistory: Bool = true
     /// 播放模式变化时回报给设置层落盘。
     var persistMode: (() -> Void)?
@@ -126,8 +135,8 @@ final class PlayerEngine: ObservableObject {
     }
 
     private func addTimeObserver() {
-        // 0.5 秒一次：歌词高亮够用，界面重绘频率减半。
-        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+        // 0.25 秒一次：歌词的时间轴越密，外推要补的距离越短，越不容易跑偏。
+        let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             Task { @MainActor in
                 self?.handleTick(seconds: time.seconds)
@@ -396,6 +405,12 @@ final class PlayerEngine: ObservableObject {
         guard let track = current else { return }
         LyricsService.forget(track.id)
         loadLyrics(for: track)
+    }
+
+    /// 歌词该用的时间轴：外推后的媒体时间 − 输出延迟 − 用户偏移。
+    /// 切行与逐字点亮都用它，两者才不会各偏各的。
+    func lyricTime(now: Date = .now) -> Double {
+        max(0, clock.live(now: now) - LyricTiming.outputLatency - lyricOffset)
     }
 
     // MARK: - 单曲解析

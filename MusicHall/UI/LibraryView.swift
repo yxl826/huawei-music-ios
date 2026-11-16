@@ -199,6 +199,30 @@ struct SettingsView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
                         divider
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("歌词偏移")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Theme.text)
+                                Text("歌词比声音早就调大，晚就调小")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Theme.faint)
+                            }
+                            Spacer(minLength: 8)
+                            Text(String(format: "%+.2f s", settings.settings.lyricOffset))
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(Theme.muted)
+                            Stepper(
+                                "",
+                                value: $settings.settings.lyricOffset,
+                                in: -0.8...0.8,
+                                step: 0.05
+                            )
+                            .labelsHidden()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        divider
                         Button {
                             LyricsService.clearCache()
                             toast.show("已清除本机歌词缓存")

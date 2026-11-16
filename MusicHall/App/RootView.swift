@@ -78,6 +78,9 @@ struct RootView: View {
         .onChange(of: settings.settings.syncHistory) { value in
             player.syncHistory = value
         }
+        .onChange(of: settings.settings.lyricOffset) { value in
+            player.lyricOffset = value
+        }
         .onChange(of: session.isAuthenticated) { authenticated in
             if authenticated {
                 player.restoreQueue()
@@ -98,6 +101,7 @@ struct RootView: View {
         engine.mode = settingsStore.settings.playMode
         engine.quality = settingsStore.settings.quality
         engine.syncHistory = settingsStore.settings.syncHistory
+        engine.lyricOffset = settingsStore.settings.lyricOffset
         if sessionStore.isAuthenticated {
             engine.restoreQueue()
         }
