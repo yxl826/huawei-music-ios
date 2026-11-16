@@ -87,7 +87,17 @@ struct Playlist: Identifiable, Hashable, Codable {
 struct LyricsLine: Hashable {
     var timeMs: Double?
     var text: String
+    /// 中文翻译（网易云的 tlyric）。
     var translation: String?
+    /// 音译：粤语/日语的罗马音（网易云的 romalrc），按需显示。
+    var romanization: String?
+
+    init(timeMs: Double?, text: String, translation: String? = nil, romanization: String? = nil) {
+        self.timeMs = timeMs
+        self.text = text
+        self.translation = translation
+        self.romanization = romanization
+    }
 }
 
 struct LyricsDoc {

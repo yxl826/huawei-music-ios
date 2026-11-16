@@ -6,12 +6,25 @@ struct AppSettings: Codable, Equatable {
     var playMode: PlayMode
     /// 歌词整体延后多少秒（负值提前）。输出延迟因设备/耳机而异，留给用户微调。
     var lyricOffset: Double
+    /// 显示中文翻译（网易云的 tlyric）。
+    var showTranslation: Bool
+    /// 显示音译（粤语/日语的罗马音，网易云的 romalrc）。
+    var showRomanization: Bool
 
-    init(quality: Quality, syncHistory: Bool, playMode: PlayMode, lyricOffset: Double = 0) {
+    init(
+        quality: Quality,
+        syncHistory: Bool,
+        playMode: PlayMode,
+        lyricOffset: Double = 0,
+        showTranslation: Bool = true,
+        showRomanization: Bool = false
+    ) {
         self.quality = quality
         self.syncHistory = syncHistory
         self.playMode = playMode
         self.lyricOffset = lyricOffset
+        self.showTranslation = showTranslation
+        self.showRomanization = showRomanization
     }
 
     init(from decoder: Decoder) throws {
@@ -21,6 +34,8 @@ struct AppSettings: Codable, Equatable {
         playMode = try container.decode(PlayMode.self, forKey: .playMode)
         // 旧版本存下来的数据里没有这一项：给个缺省值，别因为多了一个字段就把设置全丢掉。
         lyricOffset = try container.decodeIfPresent(Double.self, forKey: .lyricOffset) ?? 0
+        showTranslation = try container.decodeIfPresent(Bool.self, forKey: .showTranslation) ?? true
+        showRomanization = try container.decodeIfPresent(Bool.self, forKey: .showRomanization) ?? false
     }
 
     static let fallback = AppSettings(quality: .standard, syncHistory: true, playMode: .sequential)

@@ -179,6 +179,16 @@ enum LyricsService {
     static func load(track: Track) async -> LyricsDoc {
         if let hit = cache[track.id] { return hit }
 
+        // 0. 第三方（网易云）：按「歌名 + 歌手 + 专辑」搜，命中就优先用。
+        //    它的翻译与音译是分开的字段，才能做成开关；华为那份是合在行里的。
+        do {
+            if let external = try await NeteaseLyrics.fetch(track: track), !external.lines.isEmpty {
+                return finish(track.id, external)
+            }
+        } catch {
+            // 第三方失败不是错误，继续走华为。
+        }
+
         var notes: [String] = []
 
         // 1. 列表/搜索/歌单随曲目下发的地址，命中率最高。

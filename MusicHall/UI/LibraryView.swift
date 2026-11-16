@@ -245,6 +245,23 @@ struct SettingsView: View {
                     .panel()
                 }
 
+                section(title: "歌词") {
+                    VStack(spacing: 0) {
+                        toggleRow(
+                            title: "显示翻译",
+                            detail: "优先取第三方歌词源（网易云）的翻译，原文与译文分开显示",
+                            isOn: $settings.settings.showTranslation
+                        )
+                        divider
+                        toggleRow(
+                            title: "显示音译",
+                            detail: "粤语 / 日语的罗马音，跟在原文下面",
+                            isOn: $settings.settings.showRomanization
+                        )
+                    }
+                    .panel()
+                }
+
                 section(title: "账号") {
                     VStack(spacing: 0) {
                         HStack {

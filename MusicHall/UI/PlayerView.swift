@@ -423,6 +423,7 @@ private struct ProgressSection: View {
 
 private struct LyricsPane: View {
     @EnvironmentObject private var player: PlayerEngine
+    @EnvironmentObject private var settings: SettingsStore
 
     let lines: [LyricsLine]
     let activeIndex: Int
@@ -518,7 +519,20 @@ private struct LyricsPane: View {
                 dimOpacity: dimOpacity,
                 blur: blur
             )
-            if let translation = line.translation, !translation.isEmpty {
+            // 音译（粤语/日语罗马音）与翻译各自一个开关，谁的开关关掉就不占位。
+            if settings.settings.showRomanization,
+               let romanization = line.romanization, !romanization.isEmpty {
+                Text(romanization)
+                    .font(.system(size: isActive ? 14 : 13, weight: .medium))
+                    .foregroundStyle(
+                        Color.white.opacity(isActive ? 0.62 : (isManualScrolling ? 0.5 : 0.24))
+                    )
+                    .blur(radius: blur * 0.6)
+                    .multilineTextAlignment(.leading)
+                    .frame(width: rowWidth, alignment: .leading)
+            }
+            if settings.settings.showTranslation,
+               let translation = line.translation, !translation.isEmpty {
                 Text(translation)
                     .font(.system(size: isActive ? 15 : 14, weight: .medium))
                     .foregroundStyle(
@@ -654,7 +668,7 @@ private struct LyricSyncSheet: View {
                 .frame(width: 36, height: 4)
                 .padding(.top, 8)
 
-            Text("歌词微调")
+            Text("歌词")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Theme.text)
 
@@ -663,6 +677,12 @@ private struct LyricSyncSheet: View {
                 .foregroundStyle(Theme.faint)
                 .lineLimit(1)
                 .padding(.horizontal, 24)
+
+            HStack(spacing: 10) {
+                toggleChip("翻译", isOn: $settings.settings.showTranslation)
+                toggleChip("音译", isOn: $settings.settings.showRomanization)
+            }
+            .padding(.top, 2)
 
             Text(label)
                 .font(.system(size: 34, weight: .bold, design: .rounded))
@@ -699,6 +719,23 @@ private struct LyricSyncSheet: View {
     private var label: String {
         if abs(value) < 0.005 { return "0.00 s" }
         return String(format: "%+.2f s", value)
+    }
+
+    private func toggleChip(_ title: String, isOn: Binding<Bool>) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isOn.wrappedValue ? Theme.bg : Theme.text.opacity(0.9))
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .background(
+                    isOn.wrappedValue ? Theme.primary : Theme.surface2,
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func chip(_ title: String, _ delta: Double?) -> some View {
