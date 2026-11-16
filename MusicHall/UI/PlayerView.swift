@@ -269,10 +269,8 @@ struct PlayerView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if showLanguageMenu {
                         LyricLanguageCard(
-                            showRomanization: $settings.settings.showRomanization,
-                            showTranslation: $settings.settings.showTranslation,
-                            hasTranslation: lyricHasTranslation,
-                            hasRomanization: lyricHasRomanization
+                            showSubline: $settings.settings.showLyricSubline,
+                            available: lyricHasRomanization || lyricHasTranslation
                         ) {
                             toggleLanguageMenu(false)
                         }
@@ -580,8 +578,11 @@ private struct LyricsPane: View {
         let blur: CGFloat = isManualScrolling ? 0 : min(1.8, CGFloat(distance) * 0.5)
         let scale: CGFloat = isActive ? 1 : 0.97
 
-        let roma = settings.settings.showRomanization ? line.romanization : nil
-        let translation = settings.settings.showTranslation ? line.translation : nil
+        // 一个开关管「原文下面那几行」：音译在上、翻译在下，有哪个显示哪个。
+        // 一首歌里这两样几乎不会同时有内容，分成两个开关必然有一个永远是灰的。
+        let showSubline = settings.settings.showLyricSubline
+        let roma = showSubline ? line.romanization : nil
+        let translation = showSubline ? line.translation : nil
         let hasRomanization = !(roma ?? "").isEmpty
         let hasTranslation = !(translation ?? "").isEmpty
 
@@ -598,7 +599,7 @@ private struct LyricsPane: View {
                 blur: blur
             )
 
-            // 音译（粤语/日语罗马音）与翻译各自一个开关，谁的开关关掉就不占位。
+            // 音译（粤语/日语罗马音）优先，没有音译时才用翻译；两者共用一个开关。
             if hasRomanization, let romanization = roma {
                 Text(romanization)
                     .font(.system(size: isActive ? 15 : 13.5, weight: .regular))
@@ -734,35 +735,25 @@ private struct KaraokeLine: View {
 
 // MARK: - 发音 / 翻译菜单
 
-/// Apple Music 里点「文A」气泡弹出的那块玻璃：两行开关，标签写成「动作」
-/// （当前显示着就写「隐藏发音」），没有对应内容的那一行置灰不可点。
+/// Apple Music 里点「文A」气泡弹出的那块玻璃：一行开关，标签写成「动作」
+/// （当前显示着就写「隐藏发音与翻译」），没有对应内容时置灰不可点。
+///
+/// 早先是「发音」「翻译」两个开关，但一首歌里几乎只会命中其中一个
+/// （粤语/闽南语走音译，外语走翻译），另一个永远是灰的——所以合成一个。
 private struct LyricLanguageCard: View {
-    @Binding var showRomanization: Bool
-    @Binding var showTranslation: Bool
-    let hasTranslation: Bool
-    let hasRomanization: Bool
+    @Binding var showSubline: Bool
+    let available: Bool
     let onToggle: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            item(
-                title: showRomanization ? "隐藏发音" : "显示发音",
-                symbol: "character.bubble",
-                enabled: hasRomanization,
-                struck: showRomanization
-            ) {
-                showRomanization.toggle()
-                onToggle()
-            }
-            item(
-                title: showTranslation ? "隐藏翻译" : "显示翻译",
-                symbol: "text.bubble",
-                enabled: hasTranslation,
-                struck: showTranslation
-            ) {
-                showTranslation.toggle()
-                onToggle()
-            }
+        item(
+            title: showSubline ? "隐藏发音与翻译" : "显示发音与翻译",
+            symbol: "character.bubble",
+            enabled: available,
+            struck: showSubline
+        ) {
+            showSubline.toggle()
+            onToggle()
         }
         .padding(6)
         .frame(width: 216, alignment: .leading)
@@ -832,17 +823,11 @@ private struct LyricSyncSheet: View {
                 .lineLimit(1)
                 .padding(.horizontal, 24)
 
-            HStack(spacing: 10) {
-                toggleChip("翻译", isOn: $settings.settings.showTranslation)
-                toggleChip("音译", isOn: $settings.settings.showRomanization)
-            }
-            .padding(.top, 2)
-
             Text(label)
                 .font(.system(size: 34, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(Theme.text)
-                .padding(.top, 2)
+                .padding(.top, 6)
 
             HStack(spacing: 8) {
                 chip("提前 0.5", -0.5)
@@ -873,23 +858,6 @@ private struct LyricSyncSheet: View {
     private var label: String {
         if abs(value) < 0.005 { return "0.00 s" }
         return String(format: "%+.2f s", value)
-    }
-
-    private func toggleChip(_ title: String, isOn: Binding<Bool>) -> some View {
-        Button {
-            isOn.wrappedValue.toggle()
-        } label: {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isOn.wrappedValue ? Theme.bg : Theme.text.opacity(0.9))
-                .padding(.horizontal, 14)
-                .frame(height: 30)
-                .background(
-                    isOn.wrappedValue ? Theme.primary : Theme.surface2,
-                    in: Capsule()
-                )
-        }
-        .buttonStyle(.plain)
     }
 
     private func chip(_ title: String, _ delta: Double?) -> some View {

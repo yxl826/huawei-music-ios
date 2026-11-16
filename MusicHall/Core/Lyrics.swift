@@ -78,13 +78,19 @@ enum LyricsParser {
         let sorted = timed.sorted { $0.timeMs < $1.timeMs }
         var merged: [LyricsLine] = []
         for entry in sorted where !isCredit(entry.text) {
-            if let previous = merged.last,
-               previous.timeMs == entry.timeMs,
-               previous.translation == nil,
-               entry.romanization == nil,
-               entry.text != previous.text {
-                merged[merged.count - 1].translation = entry.text
-                continue
+            if let previous = merged.last {
+                // 同一时间戳、同一句＝重复行，丢掉。
+                if previous.timeMs == entry.timeMs, previous.text == entry.text { continue }
+                // 同一时间戳的第二行**未必**是译文：华为的国语歌词里常见两句共用一个时间戳，
+                // 之前一律当成译文，于是正文被塞进 translation 变成了小字。
+                // 只有「两行文字体系不同」（外语原文 + 中文译文）才合并。
+                if previous.timeMs == entry.timeMs,
+                   previous.translation == nil,
+                   entry.romanization == nil,
+                   isTranslation(entry.text, of: previous.text) {
+                    merged[merged.count - 1].translation = entry.text
+                    continue
+                }
             }
             merged.append(
                 LyricsLine(
@@ -96,6 +102,44 @@ enum LyricsParser {
             )
         }
         return LyricsDoc(synced: true, lines: merged)
+    }
+
+    /// 文字的「体系」：判断第二行到底是译文还是另一句歌词。
+    private enum Script {
+        case cjk      // 汉字
+        case kana     // 日文假名
+        case hangul   // 谚文
+        case latin    // 拉丁字母
+        case other
+    }
+
+    private static func script(of text: String) -> Script {
+        var han = 0, kana = 0, hangul = 0, latin = 0
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x3040...0x30FF: kana += 1
+            case 0xAC00...0xD7AF, 0x1100...0x11FF: hangul += 1
+            case 0x4E00...0x9FFF, 0x3400...0x4DBF: han += 1
+            case 0x41...0x5A, 0x61...0x7A: latin += 1
+            default: break
+            }
+        }
+        if kana > 0 { return .kana }
+        if hangul > 0 { return .hangul }
+        if han > 0 { return .cjk }
+        if latin > 0 { return .latin }
+        return .other
+    }
+
+    /// 只有文字体系不同才当译文：双语歌词的译文几乎总是另一种文字。
+    /// 两行都是汉字（国语歌词换了行/换了口气）就不合并，各自成行。
+    private static func isTranslation(_ candidate: String, of original: String) -> Bool {
+        let a = script(of: original)
+        let b = script(of: candidate)
+        guard a != b else { return false }
+        if b == .cjk { return true }          // 外语原词 + 中文译文（最常见）
+        if a == .cjk { return true }          // 中文原词 + 英/日译文
+        return false
     }
 
     /// 华为的歌词把音译缀在原文后面，用「^」分隔（如「人生的风景 ^lin sin ei hon ging」）。

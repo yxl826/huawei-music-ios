@@ -6,25 +6,34 @@ struct AppSettings: Codable, Equatable {
     var playMode: PlayMode
     /// 歌词整体延后多少秒（负值提前）。输出延迟因设备/耳机而异，留给用户微调。
     var lyricOffset: Double
-    /// 显示中文翻译（网易云的 tlyric）。
-    var showTranslation: Bool
-    /// 显示音译（粤语/日语的罗马音，网易云的 romalrc）。
-    var showRomanization: Bool
+    /// 原文下面那一行：有音译就显示音译，没有就显示翻译。
+    /// 1.6.0 之前这是两个开关，实测一首歌里永远只有其中一个有内容，
+    /// 另一个按钮只能是灰的，所以合成一个——和 Apple Music 一样只有一处入口。
+    var showLyricSubline: Bool
 
     init(
         quality: Quality,
         syncHistory: Bool,
         playMode: PlayMode,
         lyricOffset: Double = 0,
-        showTranslation: Bool = true,
-        showRomanization: Bool = false
+        showLyricSubline: Bool = true
     ) {
         self.quality = quality
         self.syncHistory = syncHistory
         self.playMode = playMode
         self.lyricOffset = lyricOffset
-        self.showTranslation = showTranslation
-        self.showRomanization = showRomanization
+        self.showLyricSubline = showLyricSubline
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case quality
+        case syncHistory
+        case playMode
+        case lyricOffset
+        case showLyricSubline
+        /// 1.6.0 及更早的两个旧开关，只读不写，用来把老设置迁过来。
+        case legacyShowTranslation = "showTranslation"
+        case legacyShowRomanization = "showRomanization"
     }
 
     init(from decoder: Decoder) throws {
@@ -34,16 +43,21 @@ struct AppSettings: Codable, Equatable {
         playMode = try container.decode(PlayMode.self, forKey: .playMode)
         // 旧版本存下来的数据里没有这一项：给个缺省值，别因为多了一个字段就把设置全丢掉。
         lyricOffset = try container.decodeIfPresent(Double.self, forKey: .lyricOffset) ?? 0
-        showTranslation = try container.decodeIfPresent(Bool.self, forKey: .showTranslation) ?? true
-        showRomanization = try container.decodeIfPresent(Bool.self, forKey: .showRomanization) ?? false
+
+        if let saved = try container.decodeIfPresent(Bool.self, forKey: .showLyricSubline) {
+            showLyricSubline = saved
+        } else {
+            // 迁移：旧的两个开关只要有一个是开着的，合并后继续显示。
+            // 两个键都不在（很老的存档）时按默认打开处理。
+            func legacy(_ key: CodingKeys) -> Bool? {
+                guard let value = try? container.decodeIfPresent(Bool.self, forKey: key) else { return nil }
+                return value
+            }
+            showLyricSubline = (legacy(.legacyShowTranslation) ?? true) || (legacy(.legacyShowRomanization) ?? false)
+        }
     }
 
-    static let fallback = AppSettings(
-        quality: .standard,
-        syncHistory: true,
-        playMode: .sequential,
-        showRomanization: true
-    )
+    static let fallback = AppSettings(quality: .standard, syncHistory: true, playMode: .sequential)
 }
 
 @MainActor
@@ -53,9 +67,6 @@ final class SettingsStore: ObservableObject {
     }
 
     private let storageKey = "app-settings-v1"
-    /// 1.6.0 之前，华为那份歌词把音译缀在原文里，开关管不着，所以看起来「一直有发音」。
-    /// 改成上下分行之后发音归开关管，这里替老用户打开一次，免得以为发音丢了。
-    private let romanizationMigrationKey = "lyric-romanization-default-v1"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
@@ -63,12 +74,6 @@ final class SettingsStore: ObservableObject {
             settings = saved
         } else {
             settings = .fallback
-        }
-
-        if !UserDefaults.standard.bool(forKey: romanizationMigrationKey) {
-            settings.showRomanization = true
-            UserDefaults.standard.set(true, forKey: romanizationMigrationKey)
-            persist()
         }
     }
 
