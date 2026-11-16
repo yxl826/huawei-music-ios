@@ -6,7 +6,47 @@ import UIKit
 /// 只有播放进度。单独成对象，是为了让「每秒两次」的更新不影响其它视图。
 @MainActor
 final class PlaybackClock: ObservableObject {
-    @Published var position: Double = 0
+    @Published private(set) var position: Double = 0
+
+    /// 上一次与播放器对齐的时刻。
+    private var stamp = Date()
+    /// 是否真的在走（暂停/缓冲时为 false，外推会停住）。
+    private var running = false
+
+    /// 定位或换曲：位置立刻改，但不算「正在走」。
+    func set(_ seconds: Double) {
+        position = seconds
+        stamp = Date()
+    }
+
+    /// 播放器 2Hz 回调：校准基准时刻，顺带更新是否在走的判断。
+    func sync(_ seconds: Double, running isRunning: Bool) {
+        running = isRunning
+        stamp = Date()
+        if abs(position - seconds) >= 0.05 {
+            position = seconds
+        }
+    }
+
+    func freeze() {
+        running = false
+        stamp = Date()
+    }
+
+    func resume() {
+        running = true
+        stamp = Date()
+    }
+
+    /// 把 2Hz 的进度按「距上次校准过了多久」外推成连续值。
+    ///
+    /// 这是歌词能平滑走词的关键：只读 `position` 的话，进度每 0.5 秒才跳一次，
+    /// 无论界面刷多快，看上去都是「一顿一顿」的。
+    func live(now: Date = .now) -> Double {
+        guard running else { return position }
+        let drift = now.timeIntervalSince(stamp)
+        return position + min(max(drift, 0), 0.6)
+    }
 }
 
 /// 播放内核：一个 AVPlayer + 队列 + 单曲解析。
@@ -145,7 +185,7 @@ final class PlayerEngine: ObservableObject {
         else { return }
         queue = saved.tracks
         index = min(max(0, saved.index), saved.tracks.count - 1)
-        clock.position = saved.positionSeconds
+        clock.set(saved.positionSeconds)
         loadCurrent(autoplay: false, seekTo: saved.positionSeconds)
     }
 
@@ -189,7 +229,7 @@ final class PlayerEngine: ObservableObject {
             player.replaceCurrentItem(with: nil)
             isPlaying = false
             isBuffering = false
-            clock.position = 0
+            clock.set(0)
             duration = 0
             lyrics = .empty
             lyricsNote = ""
@@ -226,11 +266,13 @@ final class PlayerEngine: ObservableObject {
         if isPlaying {
             player.pause()
             isPlaying = false
+            clock.freeze()
         } else {
             applyPendingSeekIfNeeded()
             ensureAudioSessionActive()
             player.play()
             isPlaying = true
+            clock.resume()
         }
         updateNowPlaying()
     }
@@ -239,6 +281,7 @@ final class PlayerEngine: ObservableObject {
         guard player.currentItem != nil else { return }
         player.play()
         isPlaying = true
+        clock.resume()
         ensureAudioSessionActive()
         updateNowPlaying()
     }
@@ -293,7 +336,7 @@ final class PlayerEngine: ObservableObject {
         let target = max(0, min(seconds, duration > 0 ? duration : seconds))
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero)
-        clock.position = target
+        clock.set(target)
         updateNowPlaying()
         persistQueueSoon()
     }
@@ -323,7 +366,7 @@ final class PlayerEngine: ObservableObject {
         index = -1
         isPlaying = false
         isBuffering = false
-        clock.position = 0
+        clock.set(0)
         duration = 0
         lyrics = .empty
         lyricsNote = ""
@@ -367,12 +410,13 @@ final class PlayerEngine: ObservableObject {
         lyrics = .empty
         isFavorite = false
         isBuffering = true
-        clock.position = seekTo ?? 0
+        clock.set(0)
+        clock.freeze()
         duration = track.durationSeconds ?? 0
         pendingSeek = seekTo
         // 这里不把 clock 写成目标进度：item 还没就绪，seek 可能被丢掉，
         // 那样界面会显示「150 秒」而音频其实从 0 开始，歌词就卡在中间。
-        clock.position = 0
+        clock.set(0)
         updateNowPlaying()
 
         Task {
@@ -410,7 +454,8 @@ final class PlayerEngine: ObservableObject {
         if let songDuration = info.durationSeconds, songDuration > 0 {
             duration = songDuration
         }
-        clock.position = 0
+        clock.set(0)
+        clock.freeze()
         // 刚 replaceCurrentItem 时 item 状态是 unknown，此时 seek 会被静默丢弃。
         // 之前正是这样：冷启动恢复进度失败、音频从头播，而歌词已经定位到中间。
         itemStatusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
@@ -427,6 +472,7 @@ final class PlayerEngine: ObservableObject {
             ensureAudioSessionActive()
             player.play()
             isPlaying = true
+            clock.resume()
         } else {
             isPlaying = false
             isBuffering = false
@@ -443,7 +489,7 @@ final class PlayerEngine: ObservableObject {
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero)
         // 乐观显示目标进度：真正的位置由 tick 校正，seek 偶尔失败也能自己纠正回来。
-        clock.position = target
+        clock.set(target)
     }
 
     private func ensureAudioSessionActive() {
@@ -458,9 +504,8 @@ final class PlayerEngine: ObservableObject {
         lastTickSeconds = seconds
 
         // 位置只在真的变化时推送，避免定时器空转让整棵树重绘。
-        if abs(clock.position - seconds) >= 0.05 {
-            clock.position = seconds
-        }
+        // 顺手把「是否在走」和校准时刻交给时钟，界面靠它们把 2Hz 补成连续值。
+        clock.sync(seconds, running: player.rate > 0)
         if duration <= 0, let itemDuration = player.currentItem?.duration.seconds,
            itemDuration.isFinite, itemDuration > 0 {
             duration = itemDuration

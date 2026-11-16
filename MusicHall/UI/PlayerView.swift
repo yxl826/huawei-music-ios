@@ -354,10 +354,18 @@ private struct LyricsSection: View {
             .onAppear(perform: sync)
             .onChange(of: clock.position) { _ in sync() }
             .onChange(of: lines.count) { _ in sync() }
+            // 2Hz 的进度回调最多会让「当前行」晚 0.5 秒切换；这里补到 4Hz，
+            // 切行才和走词对得上。视图只在行号变化时才重排，开销很小。
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    sync()
+                }
+            }
     }
 
     private func sync() {
-        let index = LyricsParser.activeIndex(lines, positionMs: clock.position * 1000)
+        let index = LyricsParser.activeIndex(lines, positionMs: clock.live() * 1000)
         guard index != activeIndex else { return }
         // 行的字号/缩放由各行自己的弹簧驱动，容器滚动另有更松的弹簧；
         // 不在这里统一开动画，「弹」的层次才出得来。
@@ -375,6 +383,8 @@ private struct ProgressSection: View {
                 guard player.duration > 0 else { return }
                 player.seek(to: player.duration * fraction)
             }
+            // 数据 2Hz，用一段和回调间隔等长的线性动画补成匀速前进。
+            .animation(.linear(duration: 0.5), value: clock.position)
 
             HStack {
                 Text(Self.label(clock.position))
@@ -553,15 +563,18 @@ private struct KaraokeLine: View {
     var body: some View {
         Group {
             if isActive, player.isPlaying {
-                // 进度回调只有 2Hz，刷不出渐亮；当前行单独用 20Hz 的时钟驱动。
-                TimelineView(.periodic(from: .now, by: 1.0 / 20.0)) { _ in
-                    content(at: clock.position)
+                // 跟着屏幕刷新走（最低 30fps），位置用 clock.live() 外推：
+                // 进度回调只有 2Hz，不外推的话走词每 0.5 秒才挪一次，怎么刷都生硬。
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                    content(at: clock.live(now: context.date))
                 }
             } else {
-                content(at: clock.position)
+                content(at: clock.live())
             }
         }
-        .font(.system(size: isActive ? 25 : 21, weight: isActive ? .bold : .regular))
+        // 字重保持一致：bold/regular 之间无法插值，切到当前行时会「啪」地换一次字形，
+        // 那一下比颜色变化更显生硬。改成两级都用 semibold，只靠字号与亮度区分。
+        .font(.system(size: isActive ? 25 : 21, weight: .semibold))
         .lineSpacing(3)
         .multilineTextAlignment(.leading)
         .blur(radius: blur)
@@ -603,7 +616,7 @@ private struct KaraokeLine: View {
     private func brightness(at position: Double, head: Double, fade: Double) -> Double {
         let raw = (head - position) / fade
         let clamped = min(1, max(0, raw))
-        return (clamped * 16).rounded() / 16
+        return (clamped * 24).rounded() / 24
     }
 }
 
