@@ -171,17 +171,19 @@ enum NeteaseLyrics {
         let translation = timedLines(JSONValue.text(JSONValue.dict(json["tlyric"])["lyric"]) ?? "")
         let romanization = timedLines(JSONValue.text(JSONValue.dict(json["romalrc"])["lyric"]) ?? "")
 
-        let main = timedLines(lrc).filter { !isCredit($0.text) }
+        let main = timedLines(lrc)
+            .filter { !isCredit($0.value) }
+            .sorted { $0.key < $1.key }
         guard !main.isEmpty else { return nil }
 
         var lines: [LyricsLine] = []
-        for entry in main.sorted(by: { $0.timeMs < $1.timeMs }) {
+        for (time, text) in main {
             lines.append(
                 LyricsLine(
-                    timeMs: entry.timeMs,
-                    text: entry.text,
-                    translation: nearest(entry.timeMs, in: translation),
-                    romanization: nearest(entry.timeMs, in: romanization)
+                    timeMs: time,
+                    text: text,
+                    translation: nearest(time, in: translation),
+                    romanization: nearest(time, in: romanization)
                 )
             )
         }
