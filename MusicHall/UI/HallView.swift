@@ -92,7 +92,7 @@ struct HallView: View {
                 .padding(.trailing, Theme.pagePadding)
                 .padding(.top, 2)
         }
-        .refreshable { await load() }
+        .refreshable { await load(timeout: 4) }
         .task { await load() }
         .onChange(of: session.isAuthenticated) { _ in
             Task { await load() }
@@ -145,7 +145,8 @@ struct HallView: View {
         try? await MusicAPI.shared.favorites(start: 0, limit: 50)
     }
 
-    private func load() async {
+    @MainActor
+    private func load(timeout: Double = 10) async {
         guard session.isAuthenticated else {
             playlists = []
             favorites = []
@@ -158,31 +159,36 @@ struct HallView: View {
             isLoading = false
             loadedOnce = true
         }
-        // 歌单和收藏分别看待成败：冷启动时一个请求抖动不该把整页清空。
-        async let discoveredTask = fetchPlaylists()
-        async let favoritesTask = fetchFavorites()
-        let list = await discoveredTask
-        let page = await favoritesTask
 
-        if let list { playlists = list.playlists }
-        if let page {
+        // 歌单和收藏分别看待成败：冷启动时一个请求抖动不该把整页清空。
+        // 两个请求各自把结果写进状态——即使下面等到超时先返回，数据回来也会自动补上。
+        let listTask = Task { @MainActor in
+            guard let page = await fetchPlaylists() else { return false }
+            playlists = page.playlists
+            return true
+        }
+        let favoritesTask = Task { @MainActor in
+            guard let page = await fetchFavorites() else { return false }
             favorites = page.tracks
             shufflePicks()
+            return true
         }
 
-        if list == nil || page == nil {
-            if !retriedAfterColdStart {
-                retriedAfterColdStart = true
-                Task {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    await load()
-                }
-                return
+        let listOK = await AwaitCap.value(of: listTask, within: timeout) ?? false
+        let favoritesOK = await AwaitCap.value(of: favoritesTask, within: timeout) ?? false
+
+        guard !listOK || !favoritesOK else { return }
+        if !retriedAfterColdStart {
+            retriedAfterColdStart = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await load()
             }
-            if playlists.isEmpty, favorites.isEmpty, !showedLoadError {
-                showedLoadError = true
-                toast.show("内容没加载出来，下拉可以再试一次。")
-            }
+            return
+        }
+        if playlists.isEmpty, favorites.isEmpty, !showedLoadError {
+            showedLoadError = true
+            toast.show("内容没加载出来，下拉可以再试一次。")
         }
     }
 }
@@ -233,7 +239,7 @@ struct PlaylistsView: View {
         .navigationTitle("我的歌单")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .refreshable { await load() }
+        .refreshable { await refresh() }
         .task { await load() }
     }
 
@@ -242,6 +248,7 @@ struct PlaylistsView: View {
         return max(120, (width - 12) / 2)
     }
 
+    @MainActor
     private func load() async {
         guard session.isAuthenticated else { return }
         isLoading = true
@@ -251,5 +258,10 @@ struct PlaylistsView: View {
         } catch {
             toast.show(error.readableMessage)
         }
+    }
+
+    /// 下拉刷新最多等 4 秒：慢网时不把系统的刷新菊花挂在那儿。
+    private func refresh() async {
+        await AwaitCap.run(within: 4) { await load() }
     }
 }

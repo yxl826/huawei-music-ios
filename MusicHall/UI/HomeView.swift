@@ -38,7 +38,7 @@ struct HomeView: View {
         .chromeScrollMargin()
         .background(Theme.bg)
         .scrollIndicators(.hidden)
-        .refreshable { await load() }
+        .refreshable { await load(timeout: 4) }
         .overlay(alignment: .topTrailing) {
             TopActionBar()
                 .padding(.trailing, Theme.pagePadding)
@@ -188,7 +188,8 @@ struct HomeView: View {
         try? await MusicAPI.shared.favorites(start: 0, limit: 20)
     }
 
-    private func load() async {
+    @MainActor
+    private func load(timeout: Double = 10) async {
         guard session.isAuthenticated else {
             history = []
             favorites = []
@@ -202,30 +203,36 @@ struct HomeView: View {
         }
 
         // 两个请求分别看待成败：播放历史挂了不该把收藏一起清空，
-        // 否则冷启动时一个抖动就让整页变空。
-        async let recentTask = fetchRecent()
-        async let favoritesTask = fetchFavorites()
-        let recent = await recentTask
-        let page = await favoritesTask
+        // 否则冷启动时一个抖动就让整页变空。各自把结果写进状态，
+        // 超时先返回时数据回来也能自动补上。
+        let recentTask = Task { @MainActor in
+            guard let recent = await fetchRecent() else { return false }
+            history = Array(recent.prefix(20))
+            return true
+        }
+        let favoritesTask = Task { @MainActor in
+            guard let page = await fetchFavorites() else { return false }
+            favorites = page.tracks
+            return true
+        }
 
-        if let recent { history = Array(recent.prefix(20)) }
-        if let page { favorites = page.tracks }
+        let recentOK = await AwaitCap.value(of: recentTask, within: timeout) ?? false
+        let favoritesOK = await AwaitCap.value(of: favoritesTask, within: timeout) ?? false
 
-        if recent == nil || page == nil {
-            // 冷启动最常见的情况是网络还没就绪，重试一次通常就好，
-            // 所以先静默重来，不在界面上弹错误。
-            if !retriedAfterColdStart {
-                retriedAfterColdStart = true
-                Task {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    await load()
-                }
-                return
+        guard !recentOK || !favoritesOK else { return }
+        // 冷启动最常见的情况是网络还没就绪，重试一次通常就好，
+        // 所以先静默重来，不在界面上弹错误。
+        if !retriedAfterColdStart {
+            retriedAfterColdStart = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await load()
             }
-            if history.isEmpty, favorites.isEmpty, !showedLoadError {
-                showedLoadError = true
-                toast.show("内容没加载出来，下拉可以再试一次。")
-            }
+            return
+        }
+        if history.isEmpty, favorites.isEmpty, !showedLoadError {
+            showedLoadError = true
+            toast.show("内容没加载出来，下拉可以再试一次。")
         }
     }
 }

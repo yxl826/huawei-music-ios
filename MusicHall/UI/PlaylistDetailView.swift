@@ -154,10 +154,11 @@ struct HistoryView: View {
         .navigationTitle("播放历史")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .refreshable { await load() }
+        .refreshable { await refresh() }
         .task { await load() }
     }
 
+    @MainActor
     private func load() async {
         guard session.isAuthenticated, !isLoading else { return }
         isLoading = true
@@ -167,5 +168,10 @@ struct HistoryView: View {
         } catch {
             toast.show(error.readableMessage)
         }
+    }
+
+    /// 下拉最多等 4 秒；请求本身继续跑，回来仍会写进 tracks。
+    private func refresh() async {
+        await AwaitCap.run(within: 4) { await load() }
     }
 }

@@ -28,12 +28,17 @@ final class TrackFeed: ObservableObject {
     func reload() async {
         guard !isLoading else { return }
         isLoading = true
-        defer { isLoading = false }
         tracks = []
         seen = []
         nextStart = 0
         hasMore = true
-        await appendNextPage()
+        // 翻页继续在后台跑，true 结果照样会填进 tracks；
+        // 这里最多等 5 秒，免得下拉刷新的菊花被慢网络挂住。
+        let task = Task { @MainActor in
+            await self.appendNextPage()
+            self.isLoading = false
+        }
+        _ = await AwaitCap.value(of: task, within: 5)
     }
 
     func loadMore() async {
