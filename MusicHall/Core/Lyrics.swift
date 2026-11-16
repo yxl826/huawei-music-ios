@@ -262,12 +262,14 @@ enum LyricsService {
     static func load(track: Track) async -> LyricsDoc {
         if let hit = cache[track.id] { return hit }
 
-        // 先把华为那份拿到手：它是对着这份音频做的，既当兜底，也给第三方的时间轴当尺子。
+        // 华为那份是对着**这段音频**做的，时间轴天然对齐，所以优先用它。
+        // 第三方（网易云）的 LRC 标的是它自家那份音频，前奏一不一样就整首错开，
+        // 试过对齐也救不干净——只在华为完全拿不到词时才请它兜底。
         let (local, notes) = await localDocument(track: track)
+        if let local, !local.lines.isEmpty {
+            return finish(track.id, local)
+        }
 
-        // 第三方（网易云）：按「歌名 + 歌手 + 专辑」搜索，命中就优先用。
-        // 它的翻译与音译是分开的字段，才能做成开关。但它的时间轴是按**它自家那份音频**
-        // 标的，遇到前奏长度不同的版本就会整首错开，所以要么对齐、要么放弃。
         var external: LyricsDoc?
         do {
             external = try await NeteaseLyrics.fetch(track: track)
@@ -275,12 +277,10 @@ enum LyricsService {
             external = nil
         }
         if let external, !external.lines.isEmpty, timelinePlausible(external, track: track) {
-            return finish(track.id, alignedToLocal(external, local: local))
+            return finish(track.id, external)
         }
 
-        if let local { return finish(track.id, local) }
-
-        lastDiagnostic = notes.joined(separator: "；")
+        lastDiagnostic = notes.isEmpty ? "没有取到歌词" : notes.joined(separator: "；")
         let empty = LyricsDoc.empty
         store(track.id, empty)
         return empty
@@ -332,67 +332,6 @@ enum LyricsService {
         return true
     }
 
-    /// 用华为那份的时间轴当尺子，把第三方那份整体挪过去。
-    ///
-    /// 两边按歌词文本配对（去掉空格标点），取时间差的中位数：
-    /// 同一首歌的两个版本若前奏差了 5 秒，中位数就是 5，整份挪完就对齐了。
-    /// 配对太少说明不是同一首歌的同一套词，宁可不动。
-    private static func alignedToLocal(_ external: LyricsDoc, local: LyricsDoc?) -> LyricsDoc {
-        guard let local, local.lines.count >= 6 else { return external }
-
-        var reference: [String: Double] = [:]
-        for line in local.lines {
-            guard let time = line.timeMs else { continue }
-            let key = alignKey(line.text)
-            guard !key.isEmpty, reference[key] == nil else { continue }
-            reference[key] = time
-        }
-        guard reference.count >= 4 else { return external }
-
-        var deltas: [Double] = []
-        for line in external.lines {
-            guard let time = line.timeMs, let base = reference[alignKey(line.text)] else { continue }
-            deltas.append(time - base)
-        }
-        // 至少要配上三分之一，否则可能压根不是同一首歌。
-        guard deltas.count >= max(4, external.lines.count / 3) else { return external }
-
-        let sorted = deltas.sorted()
-        let median = sorted[sorted.count / 2]
-        // 半秒以内属于两份 LRC 的正常误差，不动；差到几十秒说明配错了，也不动。
-        guard abs(median) >= 0.25, abs(median) <= 30 else { return external }
-
-        var shifted = external
-        shifted.lines = external.lines.map { line in
-            var copy = line
-            if let time = line.timeMs { copy.timeMs = max(0, time - median) }
-            return copy
-        }
-        return shifted
-    }
-
-    /// 配对用的键：去掉空格与标点，只留文字本身。
-    private static func alignKey(_ text: String) -> String {
-        let dropped = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
-        var scalars = String.UnicodeScalarView()
-        for scalar in text.unicodeScalars where !dropped.contains(scalar) {
-            scalars.append(scalar)
-        }
-        return String(scalars).lowercased()
-    }
-
-    private static func finish(_ trackId: String, _ document: LyricsDoc) -> LyricsDoc {
-        store(trackId, document)
-        lastDiagnostic = ""
-        return document
-    }
-
-    private static func store(_ trackId: String, _ document: LyricsDoc) {
-        if cache.count >= cacheLimit { cache.removeAll() }
-        cache[trackId] = document
-    }
-
-    /// 下载并解析一个歌词地址；失败时返回 (nil, 原因)。
     private static func document(from address: String) async -> (LyricsDoc?, String) {
         guard let url = SafeURL.url(address) else {
             let host = URL(string: address)?.host ?? String(address.prefix(40))
