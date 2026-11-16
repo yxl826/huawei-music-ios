@@ -58,6 +58,8 @@ final class PlayerEngine: ObservableObject {
     private var loadGeneration = 0
     private var lyricsGeneration = 0
     private var pendingSeek: Double?
+    /// 监听 item 是否就绪：只有 readyToPlay 之后的 seek 才会被真正执行。
+    private var itemStatusObservation: NSKeyValueObservation?
     private var shuffleHistory: [Int] = []
     private var listenedSeconds: Double = 0
     private var hasReported = false
@@ -225,9 +227,10 @@ final class PlayerEngine: ObservableObject {
             player.pause()
             isPlaying = false
         } else {
+            applyPendingSeekIfNeeded()
+            ensureAudioSessionActive()
             player.play()
             isPlaying = true
-            ensureAudioSessionActive()
         }
         updateNowPlaying()
     }
@@ -367,6 +370,9 @@ final class PlayerEngine: ObservableObject {
         clock.position = seekTo ?? 0
         duration = track.durationSeconds ?? 0
         pendingSeek = seekTo
+        // 这里不把 clock 写成目标进度：item 还没就绪，seek 可能被丢掉，
+        // 那样界面会显示「150 秒」而音频其实从 0 开始，歌词就卡在中间。
+        clock.position = 0
         updateNowPlaying()
 
         Task {
@@ -404,14 +410,19 @@ final class PlayerEngine: ObservableObject {
         if let songDuration = info.durationSeconds, songDuration > 0 {
             duration = songDuration
         }
-        if let target = pendingSeek, target > 0 {
-            player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
-                        toleranceBefore: .zero, toleranceAfter: .zero)
-            clock.position = target
-        } else {
-            clock.position = 0
+        clock.position = 0
+        // 刚 replaceCurrentItem 时 item 状态是 unknown，此时 seek 会被静默丢弃。
+        // 之前正是这样：冷启动恢复进度失败、音频从头播，而歌词已经定位到中间。
+        itemStatusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            switch item.status {
+            case .readyToPlay:
+                Task { @MainActor in self?.applyPendingSeekIfNeeded() }
+            case .failed:
+                Task { @MainActor in self?.pendingSeek = nil }
+            default:
+                break
+            }
         }
-        pendingSeek = nil
         if autoplay {
             ensureAudioSessionActive()
             player.play()
@@ -422,6 +433,17 @@ final class PlayerEngine: ObservableObject {
         }
         updateNowPlaying()
         persistQueueSoon()
+    }
+
+    /// 把恢复的进度落到已经就绪的 item 上；每个 item 只会执行一次。
+    private func applyPendingSeekIfNeeded() {
+        guard let target = pendingSeek, target > 0 else { return }
+        guard let item = player.currentItem, item.status == .readyToPlay else { return }
+        pendingSeek = nil
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero)
+        // 乐观显示目标进度：真正的位置由 tick 校正，seek 偶尔失败也能自己纠正回来。
+        clock.position = target
     }
 
     private func ensureAudioSessionActive() {

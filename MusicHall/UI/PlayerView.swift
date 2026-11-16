@@ -553,8 +553,8 @@ private struct KaraokeLine: View {
     var body: some View {
         Group {
             if isActive, player.isPlaying {
-                // 进度回调只有 2Hz，刷不出「一个字一个字」；当前行单独用 12Hz 的时钟。
-                TimelineView(.periodic(from: .now, by: 1.0 / 12.0)) { _ in
+                // 进度回调只有 2Hz，刷不出渐亮；当前行单独用 20Hz 的时钟驱动。
+                TimelineView(.periodic(from: .now, by: 1.0 / 20.0)) { _ in
                     content(at: clock.position)
                 }
             } else {
@@ -569,20 +569,41 @@ private struct KaraokeLine: View {
     }
 
     private func content(at time: Double) -> Text {
-        guard isActive else {
+        let characters = Array(text)
+        guard isActive, !characters.isEmpty else {
             return Text(text).foregroundColor(Color.white.opacity(dimOpacity))
         }
-        let characters = Array(text)
-        guard !characters.isEmpty else { return Text(" ") }
+
         let span = max(0.8, end - start)
         let progress = min(1, max(0, (time - start) / span))
-        let lit = min(characters.count, max(0, Int((progress * Double(characters.count)).rounded(.down))))
-        let bright = String(characters.prefix(lit))
-        let rest = String(characters.dropFirst(lit))
-        // 用 Text 拼接而不是拆成多个视图：拼接后的段落仍由文本引擎换行，
-        // 长句自动换行时逐字高亮不会错位。
-        return Text(bright).foregroundColor(Color.white)
-            + Text(rest).foregroundColor(Color.white.opacity(0.5))
+        // 「已唱到哪里」用浮点表示，才能做渐变；直接取整就会一个字一个字地跳。
+        let head = progress * Double(characters.count)
+        // 渐变带宽度：约 4 个字（短句至少 1.5 字），字在这段距离里从暗到亮。
+        let fade = max(1.5, Double(characters.count) * 0.12)
+
+        var result = Text("")
+        var index = 0
+        while index < characters.count {
+            let level = brightness(at: Double(index), head: head, fade: fade)
+            // 相邻同档的字符合并成一个 Text 片段，避免拼出几十段拖慢排版。
+            var next = index + 1
+            while next < characters.count,
+                  brightness(at: Double(next), head: head, fade: fade) == level {
+                next += 1
+            }
+            let slice = String(characters[index..<next])
+            result = result + Text(slice).foregroundColor(Color.white.opacity(0.42 + 0.58 * level))
+            index = next
+        }
+        return result
+    }
+
+    /// 单个字符的亮度：0 = 还没唱到，1 = 完全点亮。
+    /// 量化到 16 档，既看不出台阶，又能把相邻字符合并。
+    private func brightness(at position: Double, head: Double, fade: Double) -> Double {
+        let raw = (head - position) / fade
+        let clamped = min(1, max(0, raw))
+        return (clamped * 16).rounded() / 16
     }
 }
 
