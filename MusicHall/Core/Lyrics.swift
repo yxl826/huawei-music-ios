@@ -21,7 +21,7 @@ enum LyricsParser {
         guard !text.isEmpty else { return .empty }
 
         var offset = 0
-        var timed: [(timeMs: Double, text: String)] = []
+        var timed: [(timeMs: Double, text: String, romanization: String?)] = []
         var plain: [LyricsLine] = []
 
         for rawLine in raw.components(separatedBy: .newlines) {
@@ -36,7 +36,11 @@ enum LyricsParser {
             if firstMatch(metadataPattern, line) != nil { continue }
 
             guard let stamps = allMatches(stampPattern, line), !stamps.isEmpty else {
-                plain.append(LyricsLine(timeMs: nil, text: stripWordMarks(line), translation: nil))
+                let split = splitInlineRomanization(stripWordMarks(line))
+                guard !split.text.isEmpty else { continue }
+                plain.append(
+                    LyricsLine(timeMs: nil, text: split.text, translation: nil, romanization: split.romanization)
+                )
                 continue
             }
 
@@ -44,10 +48,19 @@ enum LyricsParser {
             let last = stamps[stamps.count - 1]
             let bodyStart = last.range.location + last.range.length
             let body = suffix(line, from: bodyStart).trimmingCharacters(in: .whitespacesAndNewlines)
-            let bodyText = stripWordMarks(body)
-            // 华为的逐行歌词用「只有时间戳、没有正文」的空行标记上一句结束，
-            // 这些行留着会在页面上变成一串空行，直接丢掉。
-            if bodyText.isEmpty { continue }
+            // 华为把音译直接缀在原文后面（「人生的风景 ^lin sin ei hon ging」），
+            // 这里先拆成原文 + 音译两个字段，渲染层才能像 Apple Music 那样上下两行。
+            let split = splitInlineRomanization(stripWordMarks(body))
+            // 只有时间戳、没有正文的空行（以及纯音译行）留着会在页面上变成一串空行。
+            let bodyText = split.text
+            if bodyText.isEmpty {
+                // 整行只有音译（「^lin sin ei hon ging」）：挂到上一句上，别丢词。
+                if let romanization = split.romanization,
+                   !timed.isEmpty, timed[timed.count - 1].romanization == nil {
+                    timed[timed.count - 1].romanization = romanization
+                }
+                continue
+            }
 
             for stamp in stamps {
                 guard stamp.captures.count >= 3,
@@ -55,7 +68,7 @@ enum LyricsParser {
                       let seconds = stamp.captures[2],
                       let timeMs = stampToMs(minutes, seconds, stamp.captures[3], offset: offset)
                 else { continue }
-                timed.append((timeMs, bodyText))
+                timed.append((timeMs, bodyText, split.romanization))
             }
         }
 
@@ -64,17 +77,43 @@ enum LyricsParser {
         }
         let sorted = timed.sorted { $0.timeMs < $1.timeMs }
         var merged: [LyricsLine] = []
-        for entry in sorted {
+        for entry in sorted where !isCredit(entry.text) {
             if let previous = merged.last,
                previous.timeMs == entry.timeMs,
                previous.translation == nil,
+               entry.romanization == nil,
                entry.text != previous.text {
                 merged[merged.count - 1].translation = entry.text
                 continue
             }
-            merged.append(LyricsLine(timeMs: entry.timeMs, text: entry.text, translation: nil))
+            merged.append(
+                LyricsLine(
+                    timeMs: entry.timeMs,
+                    text: entry.text,
+                    translation: nil,
+                    romanization: entry.romanization
+                )
+            )
         }
         return LyricsDoc(synced: true, lines: merged)
+    }
+
+    /// 华为的歌词把音译缀在原文后面，用「^」分隔（如「人生的风景 ^lin sin ei hon ging」）。
+    /// Apple Music 是「原文一行、音译一行」的上下结构，所以入库前先拆成两个字段。
+    static func splitInlineRomanization(_ body: String) -> (text: String, romanization: String?) {
+        guard let caret = body.firstIndex(where: { $0 == "^" || $0 == "＾" }) else {
+            return (body, nil)
+        }
+        let head = String(body[body.startIndex..<caret]).trimmingCharacters(in: .whitespaces)
+        let tail = String(body[body.index(after: caret)...]).trimmingCharacters(in: .whitespaces)
+        guard !tail.isEmpty else { return (head, nil) }
+        return (head, tail)
+    }
+
+    /// 「作词 : 某某」「曲：伍佰」这类制作信息不是歌词，播放页里不该滚过去。
+    private static func isCredit(_ text: String) -> Bool {
+        let pattern = "^(作词|作曲|编曲|制作人?|监制|录音|混音|母带|吉他|贝斯|鼓|键盘|和声|出品|发行|原唱|演唱|OP|SP|词|曲)\\s*[:：]"
+        return text.range(of: pattern, options: .regularExpression) != nil
     }
 
     static func activeIndex(_ lines: [LyricsLine], positionMs: Double) -> Int {

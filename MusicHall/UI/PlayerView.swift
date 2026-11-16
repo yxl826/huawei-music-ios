@@ -12,9 +12,11 @@ struct PlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var player: PlayerEngine
     @EnvironmentObject private var nav: NavState
+    @EnvironmentObject private var settings: SettingsStore
 
     @State private var page: Page = .lyrics
     @State private var showLyricSync = false
+    @State private var showLanguageMenu = false
     @State private var dragOffset: CGFloat = 0
 
     private let sidePadding: CGFloat = 20
@@ -196,6 +198,9 @@ struct PlayerView: View {
     private func lyricsPage(width: CGFloat) -> some View {
         if !player.lyrics.lines.isEmpty {
             LyricsSection(lines: player.lyrics.lines, width: width)
+                .overlay(alignment: .bottomLeading) {
+                    languageControl
+                }
         } else {
             VStack(spacing: 12) {
                 if player.isLoadingLyrics {
@@ -232,6 +237,67 @@ struct PlayerView: View {
                 }
             }
             .frame(width: width, height: 360)
+        }
+    }
+
+    // MARK: - 发音 / 翻译开关（Apple Music 那个「文A」气泡 + 玻璃菜单）
+
+    /// 歌词里确实有音译或翻译才显示这个气泡，没有可切换的内容就不占地方。
+    private var lyricHasRomanization: Bool {
+        player.lyrics.lines.contains { !($0.romanization ?? "").isEmpty }
+    }
+
+    private var lyricHasTranslation: Bool {
+        player.lyrics.lines.contains { !($0.translation ?? "").isEmpty }
+    }
+
+    @ViewBuilder
+    private var languageControl: some View {
+        if lyricHasRomanization || lyricHasTranslation {
+            ZStack(alignment: .bottomLeading) {
+                // 点空白处收起菜单。只在菜单展开时铺这一层，平时不吃手势。
+                if showLanguageMenu {
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture { toggleLanguageMenu(false) }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    if showLanguageMenu {
+                        LyricLanguageCard(
+                            showRomanization: $settings.settings.showRomanization,
+                            showTranslation: $settings.settings.showTranslation,
+                            hasTranslation: lyricHasTranslation,
+                            hasRomanization: lyricHasRomanization
+                        ) {
+                            toggleLanguageMenu(false)
+                        }
+                        .transition(
+                            .scale(scale: 0.86, anchor: .bottomLeading).combined(with: .opacity)
+                        )
+                    }
+
+                    Button {
+                        toggleLanguageMenu(!showLanguageMenu)
+                    } label: {
+                        Image(systemName: "character.bubble")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(showLanguageMenu ? 0.95 : 0.72))
+                            .frame(width: 34, height: 34)
+                            .chromeGlass(radius: 17)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(.bottom, 2)
+        }
+    }
+
+    private func toggleLanguageMenu(_ open: Bool) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+            showLanguageMenu = open
         }
     }
 
@@ -509,7 +575,14 @@ private struct LyricsPane: View {
         let blur: CGFloat = isManualScrolling ? 0 : min(1.8, CGFloat(distance) * 0.5)
         let scale: CGFloat = isActive ? 1 : 0.97
 
-        return VStack(alignment: .leading, spacing: 4) {
+        let roma = settings.settings.showRomanization ? line.romanization : nil
+        let translation = settings.settings.showTranslation ? line.translation : nil
+        let hasRomanization = !(roma ?? "").isEmpty
+        let hasTranslation = !(translation ?? "").isEmpty
+
+        // Apple Music 的层次是「原文大而亮，音译/翻译另起一行、小一号、更暗」，
+        // 绝不把音译缀在原文后面——那种排法一换行就分不清哪句是哪句。
+        return VStack(alignment: .leading, spacing: 0) {
             KaraokeLine(
                 text: line.text,
                 start: (line.timeMs ?? 0) / 1000,
@@ -519,28 +592,32 @@ private struct LyricsPane: View {
                 dimOpacity: dimOpacity,
                 blur: blur
             )
+
             // 音译（粤语/日语罗马音）与翻译各自一个开关，谁的开关关掉就不占位。
-            if settings.settings.showRomanization,
-               let romanization = line.romanization, !romanization.isEmpty {
+            if hasRomanization, let romanization = roma {
                 Text(romanization)
-                    .font(.system(size: isActive ? 14 : 13, weight: .medium))
+                    .font(.system(size: isActive ? 15 : 13.5, weight: .regular))
+                    .tracking(0.2)
+                    .lineSpacing(2)
                     .foregroundStyle(
-                        Color.white.opacity(isActive ? 0.62 : (isManualScrolling ? 0.5 : 0.24))
+                        Color.white.opacity(isActive ? 0.66 : (isManualScrolling ? 0.5 : 0.24))
                     )
-                    .blur(radius: blur * 0.6)
+                    .blur(radius: blur * 0.5)
                     .multilineTextAlignment(.leading)
                     .frame(width: rowWidth, alignment: .leading)
+                    .padding(.top, isActive ? 6 : 4)
             }
-            if settings.settings.showTranslation,
-               let translation = line.translation, !translation.isEmpty {
+            if hasTranslation, let translation = translation {
                 Text(translation)
-                    .font(.system(size: isActive ? 15 : 14, weight: .medium))
+                    .font(.system(size: isActive ? 16 : 14.5, weight: .regular))
+                    .lineSpacing(2)
                     .foregroundStyle(
-                        Color.white.opacity(isActive ? 0.7 : (isManualScrolling ? 0.55 : 0.28))
+                        Color.white.opacity(isActive ? 0.72 : (isManualScrolling ? 0.55 : 0.28))
                     )
-                    .blur(radius: blur * 0.6)
+                    .blur(radius: blur * 0.5)
                     .multilineTextAlignment(.leading)
                     .frame(width: rowWidth, alignment: .leading)
+                    .padding(.top, hasRomanization ? 3 : (isActive ? 6 : 4))
             }
         }
         .frame(width: rowWidth, alignment: .leading)
@@ -647,6 +724,78 @@ private struct KaraokeLine: View {
         let raw = (head - position) / fade
         let clamped = min(1, max(0, raw))
         return (clamped * 24).rounded() / 24
+    }
+}
+
+// MARK: - 发音 / 翻译菜单
+
+/// Apple Music 里点「文A」气泡弹出的那块玻璃：两行开关，标签写成「动作」
+/// （当前显示着就写「隐藏发音」），没有对应内容的那一行置灰不可点。
+private struct LyricLanguageCard: View {
+    @Binding var showRomanization: Bool
+    @Binding var showTranslation: Bool
+    let hasTranslation: Bool
+    let hasRomanization: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            item(
+                title: showRomanization ? "隐藏发音" : "显示发音",
+                symbol: "character.bubble",
+                enabled: hasRomanization,
+                struck: showRomanization
+            ) {
+                showRomanization.toggle()
+                onToggle()
+            }
+            item(
+                title: showTranslation ? "隐藏翻译" : "显示翻译",
+                symbol: "text.bubble",
+                enabled: hasTranslation,
+                struck: showTranslation
+            ) {
+                showTranslation.toggle()
+                onToggle()
+            }
+        }
+        .padding(6)
+        .frame(width: 216, alignment: .leading)
+        .chromeGlass(radius: 20)
+    }
+
+    private func item(
+        title: String,
+        symbol: String,
+        enabled: Bool,
+        struck: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 11) {
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 24, height: 24)
+                    .overlay {
+                        // 当前已开启的项，图标上带一道斜杠——和 Apple Music 一样表示「再点就关掉」。
+                        if struck {
+                            Capsule()
+                                .fill(Color.white.opacity(0.85))
+                                .frame(width: 23, height: 1.4)
+                                .rotationEffect(.degrees(-45))
+                        }
+                    }
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Color.white.opacity(enabled ? 0.92 : 0.32))
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 }
 

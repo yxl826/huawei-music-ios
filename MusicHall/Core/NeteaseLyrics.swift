@@ -177,13 +177,16 @@ enum NeteaseLyrics {
         guard !main.isEmpty else { return nil }
 
         var lines: [LyricsLine] = []
-        for (time, text) in main {
+        for (time, raw) in main {
+            // 少数曲目的 lrc 本身就把音译缀在原文后面，同样拆开，保证一律上下两行。
+            let split = LyricsParser.splitInlineRomanization(raw)
+            guard !split.text.isEmpty else { continue }
             lines.append(
                 LyricsLine(
                     timeMs: time,
-                    text: text,
+                    text: split.text,
                     translation: nearest(time, in: translation),
-                    romanization: nearest(time, in: romanization)
+                    romanization: nearest(time, in: romanization) ?? split.romanization
                 )
             )
         }

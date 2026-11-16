@@ -38,7 +38,12 @@ struct AppSettings: Codable, Equatable {
         showRomanization = try container.decodeIfPresent(Bool.self, forKey: .showRomanization) ?? false
     }
 
-    static let fallback = AppSettings(quality: .standard, syncHistory: true, playMode: .sequential)
+    static let fallback = AppSettings(
+        quality: .standard,
+        syncHistory: true,
+        playMode: .sequential,
+        showRomanization: true
+    )
 }
 
 @MainActor
@@ -48,6 +53,9 @@ final class SettingsStore: ObservableObject {
     }
 
     private let storageKey = "app-settings-v1"
+    /// 1.6.0 之前，华为那份歌词把音译缀在原文里，开关管不着，所以看起来「一直有发音」。
+    /// 改成上下分行之后发音归开关管，这里替老用户打开一次，免得以为发音丢了。
+    private let romanizationMigrationKey = "lyric-romanization-default-v1"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
@@ -55,6 +63,12 @@ final class SettingsStore: ObservableObject {
             settings = saved
         } else {
             settings = .fallback
+        }
+
+        if !UserDefaults.standard.bool(forKey: romanizationMigrationKey) {
+            settings.showRomanization = true
+            UserDefaults.standard.set(true, forKey: romanizationMigrationKey)
+            persist()
         }
     }
 
