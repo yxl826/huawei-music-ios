@@ -588,8 +588,13 @@ private struct KaraokeLine: View {
             return Text(text).foregroundColor(Color.white.opacity(dimOpacity))
         }
 
-        let span = max(0.8, end - start)
-        let progress = min(1, max(0, (time - start) / span))
+        // 不能把一整行无条件铺满「本行 → 下一行」的空档：遇到长间奏，字就爬得极慢；
+        // 遇到连句，又一下冲到底。改成按自然语速走完（每字约 0.3 秒，最少 1.2 秒），
+        // 走完就整句保持点亮——这样每首歌、每一句的推进速度才是一致的。
+        let span = max(0.6, end - start)
+        let natural = max(1.2, Double(characters.count) * 0.30)
+        let duration = min(span, natural)
+        let progress = min(1, max(0, (time - start) / duration))
         // 「已唱到哪里」用浮点表示，才能做渐变；直接取整就会一个字一个字地跳。
         let head = progress * Double(characters.count)
         // 渐变带宽度：约 4 个字（短句至少 1.5 字），字在这段距离里从暗到亮。

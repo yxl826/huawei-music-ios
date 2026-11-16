@@ -102,6 +102,9 @@ final class PlayerEngine: ObservableObject {
     private let player = AVPlayer()
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    /// 退到后台就把进度写盘：被系统或用户杀掉时最多只丢几秒。
+    private var resignObserver: NSObjectProtocol?
+    private var backgroundObserver: NSObjectProtocol?
     private var failObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
     private var loadGeneration = 0
@@ -160,6 +163,16 @@ final class PlayerEngine: ObservableObject {
                 self.isPlaying = false
                 self.errorMessage = "这首歌暂时没能播放，稍后可以再点一次。"
             }
+        }
+        resignObserver = center.addObserver(
+            forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.persistQueue() }
+        }
+        backgroundObserver = center.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.persistQueue() }
         }
         interruptionObserver = center.addObserver(
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
@@ -281,6 +294,9 @@ final class PlayerEngine: ObservableObject {
             ensureAudioSessionActive()
             player.play()
             isPlaying = true
+            // 以播放器此刻的真实位置为起点，别再拿内存里的旧进度去外推。
+            let actual = player.currentTime().seconds
+            clock.set(actual.isFinite ? max(0, actual) : 0)
             clock.resume()
         }
         updateNowPlaying()
@@ -483,6 +499,11 @@ final class PlayerEngine: ObservableObject {
                 break
             }
         }
+        // 兜底：KVO 偶尔会因为 item 已被缓存而错过时机，1.5 秒后再补一次恢复进度。
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            self?.applyPendingSeekIfNeeded()
+        }
         if autoplay {
             ensureAudioSessionActive()
             player.play()
@@ -501,10 +522,24 @@ final class PlayerEngine: ObservableObject {
         guard let target = pendingSeek, target > 0 else { return }
         guard let item = player.currentItem, item.status == .readyToPlay else { return }
         pendingSeek = nil
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
-                    toleranceBefore: .zero, toleranceAfter: .zero)
-        // 乐观显示目标进度：真正的位置由 tick 校正，seek 偶尔失败也能自己纠正回来。
-        clock.set(target)
+        player.seek(
+            to: CMTime(seconds: target, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        ) { [weak self] finished in
+            Task { @MainActor in
+                guard let self else { return }
+                // 以播放器的真实位置为准：seek 可能被夹到可播范围内，也可能整个失败。
+                // 之前这里是乐观地写目标值，一旦失败就变成「进度条在 2:30、声音在 0:00」。
+                let actual = self.player.currentTime().seconds
+                let usable = actual.isFinite && actual >= 0
+                if !finished || !usable {
+                    self.clock.set(usable ? actual : 0)
+                } else {
+                    self.clock.set(actual)
+                }
+            }
+        }
     }
 
     private func ensureAudioSessionActive() {
