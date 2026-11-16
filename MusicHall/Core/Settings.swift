@@ -57,6 +57,16 @@ struct AppSettings: Codable, Equatable {
         }
     }
 
+    /// 手写 encode：CodingKeys 里多了两个只读的迁移键，自动合成会认为对不上而编译失败。
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(quality, forKey: .quality)
+        try container.encode(syncHistory, forKey: .syncHistory)
+        try container.encode(playMode, forKey: .playMode)
+        try container.encode(lyricOffset, forKey: .lyricOffset)
+        try container.encode(showLyricSubline, forKey: .showLyricSubline)
+    }
+
     static let fallback = AppSettings(quality: .standard, syncHistory: true, playMode: .sequential)
 }
 
