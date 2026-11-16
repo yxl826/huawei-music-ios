@@ -117,12 +117,12 @@ enum NeteaseLyrics {
             guard matchedArtist else { continue }
             score += 40
 
-            if let duration, let candidateDuration = candidate.duration {
+            if let duration, let candidateDuration = candidate.duration, candidateDuration > 30 {
                 let diff = abs(candidateDuration - duration)
-                if diff <= 3 { score += 20 }
-                else if diff <= 8 { score += 12 }
-                else if diff <= 20 { score += 4 }
-                else if diff > 60 { score -= 15 }
+                // 时长差太多就直接判为别的版本（Live／加长版／剪过的）。标题歌手再像也不能用：
+                // 它的 LRC 是给另一段音频标的，套上来会整首错开。
+                guard diff <= 8 else { continue }
+                score += diff <= 2 ? 20 : 10
             }
 
             if let current = best {

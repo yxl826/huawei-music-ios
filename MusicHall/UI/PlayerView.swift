@@ -805,6 +805,8 @@ private struct LyricSyncSheet: View {
     @EnvironmentObject private var settings: SettingsStore
 
     @State private var value: Double = 0
+    /// onAppear 里会写一次 value，别把那次写入当成用户操作存下来。
+    @State private var ready = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -829,16 +831,27 @@ private struct LyricSyncSheet: View {
                 .foregroundStyle(Theme.text)
                 .padding(.top, 6)
 
-            HStack(spacing: 8) {
+            // 拖动就是连续微调：慢歌整句差半秒、前奏差几秒，都能一次拉到位，不用狂点按钮。
+            Slider(value: $value, in: -10...10, step: 0.05) { editing in
+                if !editing { LyricOffsetStore.shared.set(value, for: track.id) }
+            }
+            .tint(Color.white.opacity(0.88))
+            .padding(.horizontal, 24)
+            .onChange(of: value) { newValue in
+                guard ready else { return }
+                LyricOffsetStore.shared.set(newValue, for: track.id)
+            }
+
+            HStack(spacing: 6) {
+                chip("提前 1", -1)
                 chip("提前 0.5", -0.5)
-                chip("提前 0.1", -0.1)
                 chip("跟随全局", nil)
-                chip("延后 0.1", 0.1)
                 chip("延后 0.5", 0.5)
+                chip("延后 1", 1)
             }
             .padding(.top, 2)
 
-            Text("只对这一首歌生效。歌词比声音早就点「提前」，晚就点「延后」。")
+            Text("只对这一首歌生效。歌词比声音早就往左拉，晚就往右拉。")
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.faint)
                 .multilineTextAlignment(.center)
@@ -848,10 +861,11 @@ private struct LyricSyncSheet: View {
         }
         .frame(maxWidth: .infinity)
         .background(Theme.bg)
-        .presentationDetents([.height(300)])
+        .presentationDetents([.height(330)])
         .preferredColorScheme(.dark)
         .onAppear {
             value = LyricOffsetStore.shared.offset(for: track.id) ?? settings.settings.lyricOffset
+            ready = true
         }
     }
 
@@ -863,7 +877,7 @@ private struct LyricSyncSheet: View {
     private func chip(_ title: String, _ delta: Double?) -> some View {
         Button {
             if let delta {
-                value = min(2, max(-2, ((value + delta) * 100).rounded() / 100))
+                value = min(10, max(-10, ((value + delta) * 100).rounded() / 100))
                 LyricOffsetStore.shared.set(value, for: track.id)
             } else {
                 // 交还给全局偏移：清掉这首歌的记录，以后改全局它也跟着走。

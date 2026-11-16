@@ -262,53 +262,123 @@ enum LyricsService {
     static func load(track: Track) async -> LyricsDoc {
         if let hit = cache[track.id] { return hit }
 
-        // 0. 第三方（网易云）：按「歌名 + 歌手 + 专辑」搜，命中就优先用。
-        //    它的翻译与音译是分开的字段，才能做成开关；华为那份是合在行里的。
+        // 先把华为那份拿到手：它是对着这份音频做的，既当兜底，也给第三方的时间轴当尺子。
+        let (local, notes) = await localDocument(track: track)
+
+        // 第三方（网易云）：按「歌名 + 歌手 + 专辑」搜索，命中就优先用。
+        // 它的翻译与音译是分开的字段，才能做成开关。但它的时间轴是按**它自家那份音频**
+        // 标的，遇到前奏长度不同的版本就会整首错开，所以要么对齐、要么放弃。
+        var external: LyricsDoc?
         do {
-            if let external = try await NeteaseLyrics.fetch(track: track), !external.lines.isEmpty {
-                return finish(track.id, external)
-            }
+            external = try await NeteaseLyrics.fetch(track: track)
         } catch {
-            // 第三方失败不是错误，继续走华为。
+            external = nil
+        }
+        if let external, !external.lines.isEmpty, timelinePlausible(external, track: track) {
+            return finish(track.id, alignedToLocal(external, local: local))
         }
 
-        var notes: [String] = []
-
-        // 1. 列表/搜索/歌单随曲目下发的地址，命中率最高。
-        if let address = track.lyricAddress {
-            let (document, note) = await document(from: address)
-            if let document { return finish(track.id, document) }
-            notes.append("曲目自带地址：\(note)")
-        }
-
-        // 2. 播放解析响应：少数曲目只在这里带地址或内嵌歌词。
-        let response = try? await MusicAPI.shared.playbackResponse(trackId: track.id, quality: .standard)
-        if let response, let address = addressInResponse(response) {
-            let (document, note) = await document(from: address)
-            if let document { return finish(track.id, document) }
-            notes.append("播放响应地址：\(note)")
-        } else if let response, let inline = inlineLyrics(response) {
-            let document = LyricsParser.parse(inline)
-            if !document.lines.isEmpty { return finish(track.id, document) }
-            notes.append("播放响应内嵌歌词解析为空")
-        } else {
-            notes.append("播放响应里没有歌词地址")
-        }
-
-        // 3. 兜底：按「歌名 歌手」搜一次，只有 contentID 完全一致才采用，
-        //    避免把翻唱或同名 Live 版的歌词套到当前曲目上。
-        if let address = await searchedAddress(for: track) {
-            let (document, note) = await document(from: address)
-            if let document { return finish(track.id, document) }
-            notes.append("搜索结果地址：\(note)")
-        } else {
-            notes.append("按歌名搜索没有匹配到同一首歌")
-        }
+        if let local { return finish(track.id, local) }
 
         lastDiagnostic = notes.joined(separator: "；")
         let empty = LyricsDoc.empty
         store(track.id, empty)
         return empty
+    }
+
+    /// 华为那份的三级来源：曲目自带地址 → 播放解析响应 → 按歌名搜索（contentID 必须一致）。
+    /// 同时带回落空的原因，给播放页的空态显示。
+    private static func localDocument(track: Track) async -> (LyricsDoc?, [String]) {
+        var notes: [String] = []
+
+        if let address = track.lyricAddress {
+            let (document, note) = await document(from: address)
+            if let document { return (document, notes) }
+            notes.append("曲目自带地址：\(note)")
+        }
+
+        let response = try? await MusicAPI.shared.playbackResponse(trackId: track.id, quality: .standard)
+        if let response, let address = addressInResponse(response) {
+            let (document, note) = await document(from: address)
+            if let document { return (document, notes) }
+            notes.append("播放响应地址：\(note)")
+        } else if let response, let inline = inlineLyrics(response) {
+            let document = LyricsParser.parse(inline)
+            if !document.lines.isEmpty { return (document, notes) }
+            notes.append("播放响应内嵌歌词解析为空")
+        } else {
+            notes.append("播放响应里没有歌词地址")
+        }
+
+        if let address = await searchedAddress(for: track) {
+            let (document, note) = await document(from: address)
+            if let document { return (document, notes) }
+            notes.append("搜索结果地址：\(note)")
+        } else {
+            notes.append("按歌名搜索没有匹配到同一首歌")
+        }
+        return (nil, notes)
+    }
+
+    /// 时间轴是否对得上这份音频：最后一句不该落在整首歌结束之后。
+    /// 常见错法是匹配到了 Live / 加长版，歌词整整多出一分钟。
+    private static func timelinePlausible(_ document: LyricsDoc, track: Track) -> Bool {
+        guard let duration = track.durationSeconds, duration > 30,
+              let last = document.lines.compactMap(\.timeMs).max()
+        else { return true }
+        let lastSeconds = last / 1000
+        guard lastSeconds <= duration + 8 else { return false }
+        guard lastSeconds >= duration * 0.35 else { return false }
+        return true
+    }
+
+    /// 用华为那份的时间轴当尺子，把第三方那份整体挪过去。
+    ///
+    /// 两边按歌词文本配对（去掉空格标点），取时间差的中位数：
+    /// 同一首歌的两个版本若前奏差了 5 秒，中位数就是 5，整份挪完就对齐了。
+    /// 配对太少说明不是同一首歌的同一套词，宁可不动。
+    private static func alignedToLocal(_ external: LyricsDoc, local: LyricsDoc?) -> LyricsDoc {
+        guard let local, local.lines.count >= 6 else { return external }
+
+        var reference: [String: Double] = [:]
+        for line in local.lines {
+            guard let time = line.timeMs else { continue }
+            let key = alignKey(line.text)
+            guard !key.isEmpty, reference[key] == nil else { continue }
+            reference[key] = time
+        }
+        guard reference.count >= 4 else { return external }
+
+        var deltas: [Double] = []
+        for line in external.lines {
+            guard let time = line.timeMs, let base = reference[alignKey(line.text)] else { continue }
+            deltas.append(time - base)
+        }
+        // 至少要配上三分之一，否则可能压根不是同一首歌。
+        guard deltas.count >= max(4, external.lines.count / 3) else { return external }
+
+        let sorted = deltas.sorted()
+        let median = sorted[sorted.count / 2]
+        // 半秒以内属于两份 LRC 的正常误差，不动；差到几十秒说明配错了，也不动。
+        guard abs(median) >= 0.25, abs(median) <= 30 else { return external }
+
+        var shifted = external
+        shifted.lines = external.lines.map { line in
+            var copy = line
+            if let time = line.timeMs { copy.timeMs = max(0, time - median) }
+            return copy
+        }
+        return shifted
+    }
+
+    /// 配对用的键：去掉空格与标点，只留文字本身。
+    private static func alignKey(_ text: String) -> String {
+        let dropped = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars where !dropped.contains(scalar) {
+            scalars.append(scalar)
+        }
+        return String(scalars).lowercased()
     }
 
     private static func finish(_ trackId: String, _ document: LyricsDoc) -> LyricsDoc {
