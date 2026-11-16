@@ -359,8 +359,8 @@ private struct LyricsSection: View {
     private func sync() {
         let index = LyricsParser.activeIndex(lines, positionMs: clock.position * 1000)
         guard index != activeIndex else { return }
-        // 不在这里统一开动画：行的字号/模糊由各行自己的弹簧驱动，
-        // 容器滚动另有更松的弹簧，两者分开才有 Apple Music 那种「弹一下」的手感。
+        // 行的字号/缩放由各行自己的弹簧驱动，容器滚动另有更松的弹簧；
+        // 不在这里统一开动画，「弹」的层次才出得来。
         activeIndex = index
     }
 }
@@ -410,6 +410,9 @@ private struct LyricsPane: View {
 
     /// 手动滑动歌词后短暂停止自动跟随，否则手指还没松就开始被拽回当前行。
     @State private var manualScrollingUntil: Date = .distantPast
+    /// 手指按在歌词上时撤掉所有模糊：用户是在找某一句，不该给他一片糊的字。
+    @State private var isManualScrolling = false
+    @State private var settleTask: Task<Void, Never>?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -441,9 +444,7 @@ private struct LyricsPane: View {
             )
             .simultaneousGesture(
                 DragGesture(minimumDistance: 6)
-                    .onChanged { _ in
-                        manualScrollingUntil = Date().addingTimeInterval(2.5)
-                    }
+                    .onChanged { _ in markManualScrolling() }
             )
             .onChange(of: activeIndex) { value in
                 guard value >= 0, Date() >= manualScrollingUntil else { return }
@@ -455,6 +456,20 @@ private struct LyricsPane: View {
                 guard activeIndex > 0 else { return }
                 proxy.scrollTo(activeIndex, anchor: .center)
             }
+            .onDisappear {
+                settleTask?.cancel()
+            }
+        }
+    }
+
+    private func markManualScrolling() {
+        manualScrollingUntil = Date().addingTimeInterval(2.5)
+        if !isManualScrolling { isManualScrolling = true }
+        settleTask?.cancel()
+        settleTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            isManualScrolling = false
         }
     }
 
@@ -464,24 +479,30 @@ private struct LyricsPane: View {
         let rowWidth = max(0, width - 16)
         let distance = activeIndex >= 0 ? abs(index - activeIndex) : 99
 
-        // Apple Music 的做法：当前行清晰加粗，上下相邻的行按距离递增高斯模糊、同时变淡，
-        // 再叠一点缩放与回弹，切行时焦点像被「吸」到新的一行上。
-        let opacity: Double = isActive ? 1 : max(0.14, 0.62 - Double(distance) * 0.10)
-        let blur: CGFloat = isActive ? 0 : min(4.5, CGFloat(distance) * 0.9)
+        // 当前行以外：按距离变淡，模糊只留很少一点（之前最多 4.5pt，等于整段糊掉）；
+        // 手指滑动时模糊全撤、透明度提上来，方便一行行读。
+        let dimOpacity: Double = isManualScrolling
+            ? max(0.62, 0.94 - Double(distance) * 0.06)
+            : max(0.16, 0.62 - Double(distance) * 0.10)
+        let blur: CGFloat = isManualScrolling ? 0 : min(1.8, CGFloat(distance) * 0.5)
         let scale: CGFloat = isActive ? 1 : 0.97
 
         return VStack(alignment: .leading, spacing: 4) {
-            Text(line.text)
-                .font(.system(size: isActive ? 25 : 21, weight: isActive ? .bold : .regular))
-                .foregroundStyle(Color.white.opacity(opacity))
-                .blur(radius: blur)
-                .lineSpacing(3)
-                .multilineTextAlignment(.leading)
-                .frame(width: rowWidth, alignment: .leading)
+            KaraokeLine(
+                text: line.text,
+                start: (line.timeMs ?? 0) / 1000,
+                end: endSeconds(at: index),
+                width: rowWidth,
+                isActive: isActive,
+                dimOpacity: dimOpacity,
+                blur: blur
+            )
             if let translation = line.translation, !translation.isEmpty {
                 Text(translation)
                     .font(.system(size: isActive ? 15 : 14, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(isActive ? 0.7 : 0.28))
+                    .foregroundStyle(
+                        Color.white.opacity(isActive ? 0.7 : (isManualScrolling ? 0.55 : 0.28))
+                    )
                     .blur(radius: blur * 0.6)
                     .multilineTextAlignment(.leading)
                     .frame(width: rowWidth, alignment: .leading)
@@ -492,6 +513,7 @@ private struct LyricsPane: View {
         .scaleEffect(scale, anchor: .leading)
         // 阻尼略小于 1，收尾会轻轻过冲一下——这就是「Q弹」的来源。
         .animation(.spring(response: 0.42, dampingFraction: 0.66), value: activeIndex)
+        .animation(.easeOut(duration: 0.2), value: isManualScrolling)
         .id(index)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -499,6 +521,68 @@ private struct LyricsPane: View {
             player.seek(to: timeMs / 1000)
             if !player.isPlaying { player.togglePlayPause() }
         }
+    }
+
+    /// 这一行该唱到什么时候：下一行的开始时间；最后一行用整首歌时长兜底。
+    private func endSeconds(at index: Int) -> Double {
+        let start = (lines[index].timeMs ?? 0) / 1000
+        if index + 1 < lines.count, let next = lines[index + 1].timeMs, next / 1000 > start {
+            return next / 1000
+        }
+        if player.duration > start { return player.duration }
+        return start + 5
+    }
+}
+
+/// 逐字点亮的歌词行。
+///
+/// LRC 只有行级时间、没有字级时间，所以把「这一行从开始到下一行开始」的进度
+/// 平均分给每个字符——听感上和 Apple Music 的逐字走词一致，且不会额外依赖歌词格式。
+private struct KaraokeLine: View {
+    @EnvironmentObject private var clock: PlaybackClock
+    @EnvironmentObject private var player: PlayerEngine
+
+    let text: String
+    let start: Double
+    let end: Double
+    let width: CGFloat
+    let isActive: Bool
+    let dimOpacity: Double
+    let blur: CGFloat
+
+    var body: some View {
+        Group {
+            if isActive, player.isPlaying {
+                // 进度回调只有 2Hz，刷不出「一个字一个字」；当前行单独用 12Hz 的时钟。
+                TimelineView(.periodic(from: .now, by: 1.0 / 12.0)) { _ in
+                    content(at: clock.position)
+                }
+            } else {
+                content(at: clock.position)
+            }
+        }
+        .font(.system(size: isActive ? 25 : 21, weight: isActive ? .bold : .regular))
+        .lineSpacing(3)
+        .multilineTextAlignment(.leading)
+        .blur(radius: blur)
+        .frame(width: width, alignment: .leading)
+    }
+
+    private func content(at time: Double) -> Text {
+        guard isActive else {
+            return Text(text).foregroundColor(Color.white.opacity(dimOpacity))
+        }
+        let characters = Array(text)
+        guard !characters.isEmpty else { return Text(" ") }
+        let span = max(0.8, end - start)
+        let progress = min(1, max(0, (time - start) / span))
+        let lit = min(characters.count, max(0, Int((progress * Double(characters.count)).rounded(.down))))
+        let bright = String(characters.prefix(lit))
+        let rest = String(characters.dropFirst(lit))
+        // 用 Text 拼接而不是拆成多个视图：拼接后的段落仍由文本引擎换行，
+        // 长句自动换行时逐字高亮不会错位。
+        return Text(bright).foregroundColor(Color.white)
+            + Text(rest).foregroundColor(Color.white.opacity(0.5))
     }
 }
 
