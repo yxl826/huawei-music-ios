@@ -141,6 +141,8 @@ final class PlayerEngine: ObservableObject {
     /// 上次下发给卡片的那一句和播放状态：只在这两个变了的时候才更新。
     private var activityLine = -1
     private var activityPlaying = false
+    /// 1Hz 的卡片刷新循环。
+    private var activityTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
     private let queueStorageKey = "saved-queue-v1"
 
@@ -150,6 +152,7 @@ final class PlayerEngine: ObservableObject {
         addTimeObserver()
         addNotifications()
         setupRemoteCommands()
+        startActivityLoop()
         // 进程被杀掉时 Live Activity 可能还挂在锁屏上，启动先清掉。
         if #available(iOS 16.2, *) {
             Task { @MainActor in
@@ -665,8 +668,6 @@ final class PlayerEngine: ObservableObject {
         tickCount += 1
         // 锁屏信息不必每两秒重写一次：MPNowPlayingInfoCenter 每次写入都会触发系统侧刷新。
         if tickCount % 10 == 0 { updateNowPlaying() }
-        // 换句才真正下发，卡片上的歌词才跟得上唱到哪儿。
-        refreshLyricsActivity()
         // 5 秒落一次盘：杀后台时最多丢 5 秒，恢复的进度更贴近真实位置。
         if tickCount % 20 == 0 { persistQueueSoon() }
     }
@@ -764,45 +765,69 @@ final class PlayerEngine: ObservableObject {
 
     // MARK: - 锁屏歌词（Live Activity）
 
-    /// 把当前这一句同步到锁屏 / 通知中心的卡片。
+    /// 每秒把卡片刷新一次。
     ///
-    /// 只在「换句」或「播放状态变了」时才下发：这个回调每 0.25 秒跑一次，
-    /// 每次都推一遍既没意义，也会被系统限流、白耗电。
+    /// 之前是挂在 0.25 秒的进度回调上、只在「换句」时更新，结果卡片上的时间和进度条
+    /// 整句都不动，看着就是「不刷新」。现在单独一个 1Hz 的循环：
+    /// 换句跟着换，没换句时时间和进度条也照走。
+    private func startActivityLoop() {
+        activityTask?.cancel()
+        activityTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                self?.refreshLyricsActivity()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
     private func refreshLyricsActivity(force: Bool = false) {
         guard #available(iOS 16.2, *) else { return }
         guard let track = current else { return }
-        // 暂停着又没有卡片时不做任何事，别在冷启动恢复时凭空弹一块出来。
+        // 暂停着又还没有卡片时什么都不做，别在冷启动恢复时凭空弹一块出来。
         guard isPlaying || lyricsActivity != nil else { return }
+        // 暂停后只补一次状态，之后不必每秒再推。
+        if !force, !isPlaying, isPlaying == activityPlaying { return }
 
         let lines = lyrics.lines
         let index = lines.isEmpty ? -1 : LyricsParser.activeIndex(lines, positionMs: lyricTime() * 1000)
         let currentLine = (index >= 0 && index < lines.count) ? lines[index].text : (lines.first?.text ?? "")
-        guard force || index != activityLine || isPlaying != activityPlaying else { return }
+        let next = (index >= 0 && index + 1 < lines.count) ? lines[index + 1].text : nil
         activityLine = index
         activityPlaying = isPlaying
 
-        let next = (index >= 0 && index + 1 < lines.count) ? lines[index + 1].text : nil
         let state = LyricsActivityAttributes.ContentState(
             title: track.title,
             artist: track.artistLine,
             currentLine: currentLine,
             nextLine: (next?.isEmpty == false) ? next : nil,
             isPlaying: isPlaying,
-            position: clock.position,
+            position: max(0, clock.position),
             duration: duration
         )
-        let content = ActivityContent(state: state, staleDate: nil)
+        // staleDate 别设太近：设太近系统会把卡片标成「已过期」变灰。
+        let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(30))
 
-        if let activity = lyricsActivity {
-            Task { await activity.update(content) }
+        guard let activity = lyricsActivity else {
+            // 系统只允许在前台发起 Live Activity；在后台反复申请没有意义，等回到前台再说。
+            guard isPlaying,
+                  UIApplication.shared.applicationState == .active,
+                  ActivityAuthorizationInfo().areActivitiesEnabled
+            else { return }
+            lyricsActivity = try? Activity.request(
+                attributes: LyricsActivityAttributes(trackId: track.id),
+                content: content,
+                pushType: nil
+            )
             return
         }
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        lyricsActivity = try? Activity.request(
-            attributes: LyricsActivityAttributes(trackId: track.id),
-            content: content,
-            pushType: nil
-        )
+        Task { @MainActor in
+            _ = try? await activity.update(content)
+            // 卡片被用户关掉或过期后就不会再在活动列表里：清掉槽位，下次重新申请。
+            let alive = Activity<LyricsActivityAttributes>.activities.contains { $0.id == activity.id }
+            if !alive, (self.lyricsActivitySlot as? Activity<LyricsActivityAttributes>)?.id == activity.id {
+                self.lyricsActivitySlot = nil
+            }
+        }
     }
 
     private func endLyricsActivity() {
