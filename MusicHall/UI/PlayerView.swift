@@ -508,7 +508,7 @@ private struct LyricsPane: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 20) {
                     Color.clear.frame(height: 88)
                     ForEach(lines.indices, id: \.self) { index in
                         row(index)
@@ -539,7 +539,8 @@ private struct LyricsPane: View {
             )
             .onChange(of: activeIndex) { value in
                 guard value >= 0, Date() >= manualScrollingUntil else { return }
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                // 阻尼调接近 1：以前 0.7 会在收尾时明显回弹一下，看着像「被拽了一把」。
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.9)) {
                     proxy.scrollTo(value, anchor: .center)
                 }
             }
@@ -570,13 +571,13 @@ private struct LyricsPane: View {
         let rowWidth = max(0, width - 16)
         let distance = activeIndex >= 0 ? abs(index - activeIndex) : 99
 
-        // 当前行以外：按距离变淡，模糊只留很少一点（之前最多 4.5pt，等于整段糊掉）；
-        // 手指滑动时模糊全撤、透明度提上来，方便一行行读。
+        // 不再给非当前行加模糊：模糊的字看着像没对上焦，这正是「暗行发虚」的来源。
+        // 层次只靠亮度做，手指按住歌词时整体提亮，方便一行行读。
         let dimOpacity: Double = isManualScrolling
-            ? max(0.62, 0.94 - Double(distance) * 0.06)
-            : max(0.16, 0.62 - Double(distance) * 0.10)
-        let blur: CGFloat = isManualScrolling ? 0 : min(1.8, CGFloat(distance) * 0.5)
-        let scale: CGFloat = isActive ? 1 : 0.97
+            ? max(0.72, 0.96 - Double(distance) * 0.05)
+            : max(0.24, 0.50 - Double(distance) * 0.07)
+        // 字号固定、用缩放做大小变化：文字不会重新折行，滚动和切行才不抖。
+        let scale: CGFloat = isActive ? 1 : 0.9
 
         // 一个开关管「原文下面那几行」：音译在上、翻译在下，有哪个显示哪个。
         // 一首歌里这两样几乎不会同时有内容，分成两个开关必然有一个永远是灰的。
@@ -595,42 +596,38 @@ private struct LyricsPane: View {
                 end: endSeconds(at: index),
                 width: rowWidth,
                 isActive: isActive,
-                dimOpacity: dimOpacity,
-                blur: blur
+                dimOpacity: dimOpacity
             )
 
             // 音译（粤语/日语罗马音）优先，没有音译时才用翻译；两者共用一个开关。
             if hasRomanization, let romanization = roma {
                 Text(romanization)
-                    .font(.system(size: isActive ? 15 : 13.5, weight: .regular))
-                    .tracking(0.2)
+                    .font(.system(size: 15.5, weight: .medium))
                     .lineSpacing(2)
                     .foregroundStyle(
-                        Color.white.opacity(isActive ? 0.66 : (isManualScrolling ? 0.5 : 0.24))
+                        Color.white.opacity(isActive ? 0.60 : dimOpacity * 0.74)
                     )
-                    .blur(radius: blur * 0.5)
                     .multilineTextAlignment(.leading)
                     .frame(width: rowWidth, alignment: .leading)
-                    .padding(.top, isActive ? 6 : 4)
+                    .padding(.top, 5)
             }
             if hasTranslation, let translation = translation {
                 Text(translation)
-                    .font(.system(size: isActive ? 16 : 14.5, weight: .regular))
+                    .font(.system(size: 15.5, weight: .medium))
                     .lineSpacing(2)
                     .foregroundStyle(
-                        Color.white.opacity(isActive ? 0.72 : (isManualScrolling ? 0.55 : 0.28))
+                        Color.white.opacity(isActive ? 0.66 : dimOpacity * 0.76)
                     )
-                    .blur(radius: blur * 0.5)
                     .multilineTextAlignment(.leading)
                     .frame(width: rowWidth, alignment: .leading)
-                    .padding(.top, hasRomanization ? 3 : (isActive ? 6 : 4))
+                    .padding(.top, hasRomanization ? 2 : 5)
             }
         }
         .frame(width: rowWidth, alignment: .leading)
         // 以左边为锚点缩放：左对齐的歌词不会因为放大而整体右移。
         .scaleEffect(scale, anchor: .leading)
-        // 阻尼略小于 1，收尾会轻轻过冲一下——这就是「Q弹」的来源。
-        .animation(.spring(response: 0.42, dampingFraction: 0.66), value: activeIndex)
+        // 阻尼接近 1、但不等于 1：收尾有一点点过冲，这就是「Q弹」的来源，又不至于弹得晃眼。
+        .animation(.spring(response: 0.45, dampingFraction: 0.82), value: activeIndex)
         .animation(.easeOut(duration: 0.2), value: isManualScrolling)
         .id(index)
         .contentShape(Rectangle())
@@ -666,7 +663,6 @@ private struct KaraokeLine: View {
     let width: CGFloat
     let isActive: Bool
     let dimOpacity: Double
-    let blur: CGFloat
 
     var body: some View {
         Group {
@@ -680,12 +676,11 @@ private struct KaraokeLine: View {
                 content(at: player.lyricTime())
             }
         }
-        // 字重保持一致：bold/regular 之间无法插值，切到当前行时会「啪」地换一次字形，
-        // 那一下比颜色变化更显生硬。改成两级都用 semibold，只靠字号与亮度区分。
-        .font(.system(size: isActive ? 25 : 21, weight: .semibold))
-        .lineSpacing(3)
+        // 字号固定 24、字重固定 semibold：大小变化交给整行的缩放去做，
+        // 这样文字不会重新折行（折行一变，滚动位置就跟着抖），字重也不会在切换时「啪」地跳。
+        .font(.system(size: 24, weight: .semibold))
+        .lineSpacing(2)
         .multilineTextAlignment(.leading)
-        .blur(radius: blur)
         .frame(width: width, alignment: .leading)
     }
 
@@ -699,13 +694,13 @@ private struct KaraokeLine: View {
         // 遇到连句，又一下冲到底。改成按自然语速走完（每字约 0.3 秒，最少 1.2 秒），
         // 走完就整句保持点亮——这样每首歌、每一句的推进速度才是一致的。
         let span = max(0.6, end - start)
-        let natural = max(1.2, Double(characters.count) * 0.30)
+        let natural = max(1.4, Double(characters.count) * 0.32)
         let duration = min(span, natural)
         let progress = min(1, max(0, (time - start) / duration))
         // 「已唱到哪里」用浮点表示，才能做渐变；直接取整就会一个字一个字地跳。
         let head = progress * Double(characters.count)
-        // 渐变带宽度：约 4 个字（短句至少 1.5 字），字在这段距离里从暗到亮。
-        let fade = max(1.5, Double(characters.count) * 0.12)
+        // 渐变带宽一点：只留一两个字宽时，亮起的那条边太硬，看着像打印机一格格往前推。
+        let fade = max(2.2, Double(characters.count) * 0.20)
 
         var result = Text("")
         var index = 0
@@ -718,18 +713,20 @@ private struct KaraokeLine: View {
                 next += 1
             }
             let slice = String(characters[index..<next])
-            result = result + Text(slice).foregroundColor(Color.white.opacity(0.42 + 0.58 * level))
+            // 未唱到 0.34、唱过 0.98：不用纯白，亮着也不刺眼。
+            result = result + Text(slice).foregroundColor(Color.white.opacity(0.34 + 0.64 * level))
             index = next
         }
         return result
     }
 
     /// 单个字符的亮度：0 = 还没唱到，1 = 完全点亮。
-    /// 量化到 16 档，既看不出台阶，又能把相邻字符合并。
+    /// 用 smoothstep 做缓动：起步和收尾都慢一点，字是一段渐变亮起来的，不是「啪」地翻转。
+    /// 量化到 48 档足够平滑，也还能把相邻同亮度的字符合并成一段 Text。
     private func brightness(at position: Double, head: Double, fade: Double) -> Double {
-        let raw = (head - position) / fade
-        let clamped = min(1, max(0, raw))
-        return (clamped * 24).rounded() / 24
+        let raw = min(1, max(0, (head - position) / fade))
+        let eased = raw * raw * (3 - 2 * raw)
+        return (eased * 48).rounded() / 48
     }
 }
 
