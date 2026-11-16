@@ -87,9 +87,9 @@ struct Playlist: Identifiable, Hashable, Codable {
 struct LyricsLine: Hashable {
     var timeMs: Double?
     var text: String
-    /// 中文翻译（网易云的 tlyric）。
+    /// 译文：华为歌词里与原文共用时间戳的那一行。
     var translation: String?
-    /// 音译：粤语/日语的罗马音（网易云的 romalrc），按需显示。
+    /// 音译：华为把「^」后面的粤语/闽南语罗马音，解析时拆出来的。
     var romanization: String?
 
     init(timeMs: Double?, text: String, translation: String? = nil, romanization: String? = nil) {

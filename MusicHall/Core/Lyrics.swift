@@ -259,25 +259,14 @@ enum LyricsService {
         lastDiagnostic = ""
     }
 
+    /// 只用华为的歌词。它是对着**这段音频**做的时间轴，天然对得上；
+    /// 第三方（网易云）的 LRC 标的是它自家那份音频，前奏一不一样就整首错开，已去掉。
     static func load(track: Track) async -> LyricsDoc {
         if let hit = cache[track.id] { return hit }
 
-        // 华为那份是对着**这段音频**做的，时间轴天然对齐，所以优先用它。
-        // 第三方（网易云）的 LRC 标的是它自家那份音频，前奏一不一样就整首错开，
-        // 试过对齐也救不干净——只在华为完全拿不到词时才请它兜底。
-        let (local, notes) = await localDocument(track: track)
-        if let local, !local.lines.isEmpty {
-            return finish(track.id, local)
-        }
-
-        var external: LyricsDoc?
-        do {
-            external = try await NeteaseLyrics.fetch(track: track)
-        } catch {
-            external = nil
-        }
-        if let external, !external.lines.isEmpty, timelinePlausible(external, track: track) {
-            return finish(track.id, external)
+        let (document, notes) = await localDocument(track: track)
+        if let document, !document.lines.isEmpty {
+            return finish(track.id, document)
         }
 
         lastDiagnostic = notes.isEmpty ? "没有取到歌词" : notes.joined(separator: "；")
@@ -320,16 +309,15 @@ enum LyricsService {
         return (nil, notes)
     }
 
-    /// 时间轴是否对得上这份音频：最后一句不该落在整首歌结束之后。
-    /// 常见错法是匹配到了 Live / 加长版，歌词整整多出一分钟。
-    private static func timelinePlausible(_ document: LyricsDoc, track: Track) -> Bool {
-        guard let duration = track.durationSeconds, duration > 30,
-              let last = document.lines.compactMap(\.timeMs).max()
-        else { return true }
-        let lastSeconds = last / 1000
-        guard lastSeconds <= duration + 8 else { return false }
-        guard lastSeconds >= duration * 0.35 else { return false }
-        return true
+    private static func finish(_ trackId: String, _ document: LyricsDoc) -> LyricsDoc {
+        store(trackId, document)
+        lastDiagnostic = ""
+        return document
+    }
+
+    private static func store(_ trackId: String, _ document: LyricsDoc) {
+        if cache.count >= cacheLimit { cache.removeAll() }
+        cache[trackId] = document
     }
 
     private static func document(from address: String) async -> (LyricsDoc?, String) {

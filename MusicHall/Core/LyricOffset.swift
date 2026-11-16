@@ -10,8 +10,8 @@ final class LyricOffsetStore {
     static let shared = LyricOffsetStore()
 
     private let storageKey = "lyric-offsets-v1"
-    /// 1.6.2 起第三方歌词会整体对齐到当前音频，时间轴的基准变了：
-    /// 之前为「错开的版本」调出来的偏移量继续生效只会越调越错，所以清一次。
+    /// 1.6.3 起歌词来源换了一轮（曾用过第三方，时间轴基准不同）：
+    /// 之前为旧来源调出来的偏移量继续生效只会越调越错，所以清一次。
     private let realignKey = "lyric-offsets-realigned-v1"
     private var offsets: [String: Double] = [:]
 
