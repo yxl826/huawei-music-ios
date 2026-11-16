@@ -14,6 +14,7 @@ struct PlayerView: View {
     @EnvironmentObject private var nav: NavState
 
     @State private var page: Page = .lyrics
+    @State private var showLyricSync = false
     @State private var dragOffset: CGFloat = 0
 
     private let sidePadding: CGFloat = 20
@@ -54,6 +55,11 @@ struct PlayerView: View {
         .offset(y: dragOffset)
         .sheet(isPresented: $nav.showQueue) {
             QueueSheet()
+        }
+        .sheet(isPresented: $showLyricSync) {
+            if let track = player.current {
+                LyricSyncSheet(track: track)
+            }
         }
     }
 
@@ -314,11 +320,15 @@ struct PlayerView: View {
                 }
             }
             Spacer(minLength: 0)
+            iconButton("metronome") {
+                showLyricSync = true
+            }
+            Spacer(minLength: 0)
             iconButton("list.bullet") {
                 nav.showQueue = true
             }
         }
-        .padding(.horizontal, 22)
+        .padding(.horizontal, 14)
     }
 
     private func iconButton(_ symbol: String, action: @escaping () -> Void) -> some View {
@@ -623,6 +633,94 @@ private struct KaraokeLine: View {
         let raw = (head - position) / fade
         let clamped = min(1, max(0, raw))
         return (clamped * 24).rounded() / 24
+    }
+}
+
+// MARK: - 歌词微调
+
+/// 单曲歌词微调：不同来源的 LRC 时间轴差的不是一点，全局偏移救不了，
+/// 只能给每首歌单独一个旋钮，调过的值按 trackId 记在本机。
+private struct LyricSyncSheet: View {
+    let track: Track
+
+    @EnvironmentObject private var settings: SettingsStore
+
+    @State private var value: Double = 0
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Capsule()
+                .fill(Color.white.opacity(0.18))
+                .frame(width: 36, height: 4)
+                .padding(.top, 8)
+
+            Text("歌词微调")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.text)
+
+            Text("\(track.title) · \(track.artistLine)")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.faint)
+                .lineLimit(1)
+                .padding(.horizontal, 24)
+
+            Text(label)
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Theme.text)
+                .padding(.top, 2)
+
+            HStack(spacing: 8) {
+                chip("提前 0.5", -0.5)
+                chip("提前 0.1", -0.1)
+                chip("跟随全局", nil)
+                chip("延后 0.1", 0.1)
+                chip("延后 0.5", 0.5)
+            }
+            .padding(.top, 2)
+
+            Text("只对这一首歌生效。歌词比声音早就点「提前」，晚就点「延后」。")
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.faint)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 26)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+        .background(Theme.bg)
+        .presentationDetents([.height(300)])
+        .preferredColorScheme(.dark)
+        .onAppear {
+            value = LyricOffsetStore.shared.offset(for: track.id) ?? settings.settings.lyricOffset
+        }
+    }
+
+    private var label: String {
+        if abs(value) < 0.005 { return "0.00 s" }
+        return String(format: "%+.2f s", value)
+    }
+
+    private func chip(_ title: String, _ delta: Double?) -> some View {
+        Button {
+            if let delta {
+                value = min(2, max(-2, ((value + delta) * 100).rounded() / 100))
+                LyricOffsetStore.shared.set(value, for: track.id)
+            } else {
+                // 交还给全局偏移：清掉这首歌的记录，以后改全局它也跟着走。
+                LyricOffsetStore.shared.clear(track.id)
+                value = settings.settings.lyricOffset
+            }
+        } label: {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.text.opacity(0.9))
+                .padding(.horizontal, 9)
+                .frame(height: 30)
+                .background(Theme.surface2, in: Capsule())
+                .overlay(Capsule().stroke(Theme.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 

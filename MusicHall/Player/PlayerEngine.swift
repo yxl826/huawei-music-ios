@@ -423,10 +423,15 @@ final class PlayerEngine: ObservableObject {
         loadLyrics(for: track)
     }
 
-    /// 歌词该用的时间轴：外推后的媒体时间 − 输出延迟 − 用户偏移。
+    /// 当前这首歌实际生效的偏移：调过就用那首歌自己的值，否则用全局值。
+    var effectiveLyricOffset: Double {
+        LyricOffsetStore.shared.offset(for: current?.id) ?? lyricOffset
+    }
+
+    /// 歌词该用的时间轴：外推后的媒体时间 − 输出延迟 − 偏移。
     /// 切行与逐字点亮都用它，两者才不会各偏各的。
     func lyricTime(now: Date = .now) -> Double {
-        max(0, clock.live(now: now) - LyricTiming.outputLatency - lyricOffset)
+        max(0, clock.live(now: now) - LyricTiming.outputLatency - effectiveLyricOffset)
     }
 
     // MARK: - 单曲解析
