@@ -55,6 +55,10 @@ struct PlayerView: View {
         }
         .preferredColorScheme(.dark)
         .offset(y: dragOffset)
+        .onChange(of: player.current?.id) { _ in
+            // 换歌就把菜单收起来：新歌的歌词可能压根没有音译/翻译。
+            showLanguageMenu = false
+        }
         .sheet(isPresented: $nav.showQueue) {
             QueueSheet()
         }
@@ -381,6 +385,7 @@ struct PlayerView: View {
             }
             Spacer(minLength: 0)
             iconButton(page == .lyrics ? "photo" : "quote.bubble") {
+                showLanguageMenu = false
                 withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
                     page = (page == .lyrics ? .cover : .lyrics)
                 }
