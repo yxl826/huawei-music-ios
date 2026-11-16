@@ -110,6 +110,11 @@ final class PlayerEngine: ObservableObject {
     private var loadGeneration = 0
     private var lyricsGeneration = 0
     private var pendingSeek: Double?
+    /// seek 发起的时刻与重试次数：用来判断「目标位置到底落下去没有」。
+    private var seekIssuedAt: Date?
+    private var seekRetries = 0
+    /// 一次只允许一个 seek 在路上：KVO、兜底计时器和「按播放」都会来叫它。
+    private var seekInFlight = false
     /// 监听 item 是否就绪：只有 readyToPlay 之后的 seek 才会被真正执行。
     private var itemStatusObservation: NSKeyValueObservation?
     private var shuffleHistory: [Int] = []
@@ -290,24 +295,29 @@ final class PlayerEngine: ObservableObject {
             isPlaying = false
             clock.freeze()
         } else {
-            applyPendingSeekIfNeeded()
+            // 先出声、再落目标位置：在「没开始播」的状态下 seek 最容易被丢掉。
             ensureAudioSessionActive()
             player.play()
             isPlaying = true
-            // 以播放器此刻的真实位置为起点，别再拿内存里的旧进度去外推。
-            let actual = player.currentTime().seconds
-            clock.set(actual.isFinite ? max(0, actual) : 0)
+            if pendingSeek == nil {
+                // 没有待恢复的进度时，以播放器此刻的真实位置为起点。
+                clock.set(readPosition())
+            }
+            // 有待恢复的进度就交给 seek 的回调去写：它写的是真实位置，不是猜的。
             clock.resume()
+            applyPendingSeekIfNeeded()
         }
         updateNowPlaying()
     }
 
     func resume() {
         guard player.currentItem != nil else { return }
+        ensureAudioSessionActive()
         player.play()
         isPlaying = true
+        if pendingSeek == nil { clock.set(readPosition()) }
         clock.resume()
-        ensureAudioSessionActive()
+        applyPendingSeekIfNeeded()
         updateNowPlaying()
     }
 
@@ -450,6 +460,9 @@ final class PlayerEngine: ObservableObject {
         clock.freeze()
         duration = track.durationSeconds ?? 0
         pendingSeek = seekTo
+        seekIssuedAt = nil
+        seekRetries = 0
+        seekInFlight = false
         // 这里不把 clock 写成目标进度：item 还没就绪，seek 可能被丢掉，
         // 那样界面会显示「150 秒」而音频其实从 0 开始，歌词就卡在中间。
         clock.set(0)
@@ -492,6 +505,9 @@ final class PlayerEngine: ObservableObject {
         }
         clock.set(0)
         clock.freeze()
+        seekRetries = 0
+        seekIssuedAt = nil
+        seekInFlight = false
         // 刚 replaceCurrentItem 时 item 状态是 unknown，此时 seek 会被静默丢弃。
         // 之前正是这样：冷启动恢复进度失败、音频从头播，而歌词已经定位到中间。
         itemStatusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
@@ -514,6 +530,8 @@ final class PlayerEngine: ObservableObject {
             player.play()
             isPlaying = true
             clock.resume()
+            // 先出声再落进度：在某些曲目上，只有在播起来之后 seek 才会被真正执行。
+            applyPendingSeekIfNeeded()
         } else {
             isPlaying = false
             isBuffering = false
@@ -522,11 +540,23 @@ final class PlayerEngine: ObservableObject {
         persistQueueSoon()
     }
 
-    /// 把恢复的进度落到已经就绪的 item 上；每个 item 只会执行一次。
+    /// 把恢复/切歌的目标位置落到已经就绪的 item 上。
+    ///
+    /// 不能「发起 seek 就算完」：item 刚换、还没真正出声时，AVPlayer 偶尔会把 seek 丢掉，
+    /// 回调却照报 finished。那时若把目标清掉、界面又信了它，就成了
+    /// 「声音从头开始、进度条停在上一次的位置」——杀后台回来最常见的那一幕。
+    /// 所以这里以播放器的真实位置为准，对不上就再试，最多两次。
     private func applyPendingSeekIfNeeded() {
-        guard let target = pendingSeek, target > 0 else { return }
+        guard let target = pendingSeek else { return }
+        guard target > 0.5 else {
+            pendingSeek = nil
+            return
+        }
         guard let item = player.currentItem, item.status == .readyToPlay else { return }
-        pendingSeek = nil
+        guard !seekInFlight else { return }
+
+        seekInFlight = true
+        seekIssuedAt = Date()
         player.seek(
             to: CMTime(seconds: target, preferredTimescale: 600),
             toleranceBefore: .zero,
@@ -534,17 +564,29 @@ final class PlayerEngine: ObservableObject {
         ) { [weak self] finished in
             Task { @MainActor in
                 guard let self else { return }
-                // 以播放器的真实位置为准：seek 可能被夹到可播范围内，也可能整个失败。
-                // 之前这里是乐观地写目标值，一旦失败就变成「进度条在 2:30、声音在 0:00」。
-                let actual = self.player.currentTime().seconds
-                let usable = actual.isFinite && actual >= 0
-                if !finished || !usable {
-                    self.clock.set(usable ? actual : 0)
-                } else {
+                self.seekInFlight = false
+                let actual = self.readPosition()
+                // 真实位置落在目标 ±1 秒内才算真的落下去。
+                if finished, abs(actual - target) <= 1.0 {
+                    self.pendingSeek = nil
                     self.clock.set(actual)
+                    return
                 }
+                if self.seekRetries < 2, self.player.currentItem === item {
+                    self.seekRetries += 1
+                    self.applyPendingSeekIfNeeded()
+                    return
+                }
+                // 实在落不下去就认输：界面跟着音频走，绝不显示一个「不存在」的进度。
+                self.pendingSeek = nil
+                self.clock.set(actual)
             }
         }
+    }
+
+    private func readPosition() -> Double {
+        let seconds = player.currentTime().seconds
+        return seconds.isFinite && seconds >= 0 ? seconds : 0
     }
 
     private func ensureAudioSessionActive() {
@@ -561,6 +603,21 @@ final class PlayerEngine: ObservableObject {
         // 位置只在真的变化时推送，避免定时器空转让整棵树重绘。
         // 顺手把「是否在走」和校准时刻交给时钟，界面靠它们把 2Hz 补成连续值。
         clock.sync(seconds, running: player.rate > 0)
+        // 待恢复的进度迟迟没落下去（音频其实从 0 开始了）：再试一次，还不行就认输，
+        // 让进度条跟音频走。没有这一步，seek 被丢掉时进度条会一直停在旧位置，
+        // 比从头播更难解释。
+        if let target = pendingSeek, player.rate > 0,
+           let issued = seekIssuedAt, Date().timeIntervalSince(issued) > 2.5,
+           abs(seconds - target) > 3 {
+            // 回调迟迟不来也别把后面所有 seek 卡死。
+            seekInFlight = false
+            if seekRetries < 2 {
+                seekRetries += 1
+                applyPendingSeekIfNeeded()
+            } else {
+                pendingSeek = nil
+            }
+        }
         if duration <= 0, let itemDuration = player.currentItem?.duration.seconds,
            itemDuration.isFinite, itemDuration > 0 {
             duration = itemDuration
@@ -579,7 +636,8 @@ final class PlayerEngine: ObservableObject {
         tickCount += 1
         // 锁屏信息不必每两秒重写一次：MPNowPlayingInfoCenter 每次写入都会触发系统侧刷新。
         if tickCount % 10 == 0 { updateNowPlaying() }
-        if tickCount % 40 == 0 { persistQueueSoon() }
+        // 5 秒落一次盘：杀后台时最多丢 5 秒，恢复的进度更贴近真实位置。
+        if tickCount % 20 == 0 { persistQueueSoon() }
     }
 
     private func maybeReportPlayback() {
