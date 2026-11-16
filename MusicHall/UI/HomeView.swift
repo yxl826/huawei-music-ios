@@ -10,6 +10,8 @@ struct HomeView: View {
     @State private var favorites: [Track] = []
     @State private var isLoading = false
     @State private var loadedOnce = false
+    @State private var retriedAfterColdStart = false
+    @State private var showedLoadError = false
 
     var body: some View {
         ScrollView {
@@ -177,6 +179,15 @@ struct HomeView: View {
 
     // MARK: - 数据
 
+    /// 包一层拿到可选值：两个请求各失败各的，不互相牵连。
+    private func fetchRecent() async -> [Track]? {
+        try? await MusicAPI.shared.recent()
+    }
+
+    private func fetchFavorites() async -> (entries: [JSON], tracks: [Track], hasMore: Bool)? {
+        try? await MusicAPI.shared.favorites(start: 0, limit: 20)
+    }
+
     private func load() async {
         guard session.isAuthenticated else {
             history = []
@@ -189,15 +200,31 @@ struct HomeView: View {
             isLoading = false
             loadedOnce = true
         }
-        do {
-            async let recentTracks = MusicAPI.shared.recent()
-            async let favoritesPage = MusicAPI.shared.favorites(start: 0, limit: 20)
-            let (recent, page) = try await (recentTracks, favoritesPage)
-            history = Array(recent.prefix(20))
-            favorites = page.tracks
-        } catch {
-            if !loadedOnce {
-                toast.show(error.readableMessage)
+
+        // 两个请求分别看待成败：播放历史挂了不该把收藏一起清空，
+        // 否则冷启动时一个抖动就让整页变空。
+        async let recentTask = fetchRecent()
+        async let favoritesTask = fetchFavorites()
+        let recent = await recentTask
+        let page = await favoritesTask
+
+        if let recent { history = Array(recent.prefix(20)) }
+        if let page { favorites = page.tracks }
+
+        if recent == nil || page == nil {
+            // 冷启动最常见的情况是网络还没就绪，重试一次通常就好，
+            // 所以先静默重来，不在界面上弹错误。
+            if !retriedAfterColdStart {
+                retriedAfterColdStart = true
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    await load()
+                }
+                return
+            }
+            if history.isEmpty, favorites.isEmpty, !showedLoadError {
+                showedLoadError = true
+                toast.show("内容没加载出来，下拉可以再试一次。")
             }
         }
     }

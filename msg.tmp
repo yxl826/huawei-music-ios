@@ -1,14 +1,22 @@
-迷你播放条改用 tabViewBottomAccessory，与 dock 完全对齐
+修冷启动加载失败，并给歌词加回弹手感
 
-之前是自己在 TabBar 上方画一张卡片，左右各留 12pt、圆角 18，
-无论怎么调都和系统 dock 的宽度/圆角对不上（用户：am 的是和 dock 栏对齐的）。
+冷启动失败（播放历史 / 歌单）：
+- 真正原因是 URLSession 的 waitsForConnectivity 被关掉了。冷启动时网络栈
+  经常还没就绪（刚解锁、刚连上 Wi-Fi），请求会立刻以「未联网」失败，
+  界面就是一进首页弹「读取播放历史失败」。
+- 打开 waitsForConnectivity，资源超时 45s；读请求从「重试 1 次、间隔 250ms」
+  改成 3 次、间隔 500ms / 1.4s。业务错误（resultCode 不对）仍然不重试。
+- 首页与音乐厅不再用 async let + try await 把两个请求绑在一起：历史挂了不该
+  把收藏一起清空，改为各自返回可选值，谁成功更新谁。
+- 首次失败先静默重试一次（2 秒后），仍失败且页面为空才提示，且提示改成
+  「内容没加载出来，下拉可以再试一次」。
 
-iOS 26 正好有专门 API：`.tabViewBottomAccessory { ... }`，Apple Music 的迷你播放条
-用的就是它。系统按 TabBar 的尺寸与圆角绘制容器并把内容放进去，宽度天然与 dock 一致，
-内容也不再自己加背景/圆角/左右留白。
+歌词「Q弹」：
+- 之前所有变化都走一个 easeOut(0.3)，收尾没有过冲，所以看起来是「硬切」。
+- 现在每行用 spring(response: 0.42, dampingFraction: 0.66)——阻尼小于 1，
+  收尾会轻轻过冲；当前行以左边缘为锚点放大到 1.0、其余 0.97，字号/模糊/
+  透明度一起弹。
+- 容器自动滚动的弹簧放松到 response 0.5 / damping 0.7，跟着一起回弹。
+- sync() 不再统一包 withAnimation，滚动与行内动画分开驱动。
 
-- 新增 MiniPlayerAccessory（纯内容：38pt 封面 + 歌名/歌手 + 播放/下一首）
-- 新增 miniPlayerAccessory()：iOS 26 走系统附属视图，更早的系统什么都不做
-- 新增 miniPlayerOverlayIfNeeded()：iOS 26 不再叠旧卡片，避免两层
-- 滚动内容底部留白：iOS 26 只补 8pt（系统已占位），旧系统仍按卡片高度留
-- 版本 1.4.1
+版本 1.4.2

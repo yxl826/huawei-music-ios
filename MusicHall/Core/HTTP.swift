@@ -25,10 +25,13 @@ enum Transport {
     static let session: URLSession = {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 25
-        configuration.timeoutIntervalForResource = 40
+        configuration.timeoutIntervalForResource = 45
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpShouldSetCookies = false
-        configuration.waitsForConnectivity = false
+        // 冷启动时网络栈往往还没就绪（尤其刚解锁、刚切回 Wi-Fi），
+        // 关掉这个开关会让请求立刻以「未联网」失败——界面上就是一进首页弹错误。
+        // 打开后 URLSession 会等链路可用，最多等 timeoutIntervalForResource。
+        configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration)
     }()
 
@@ -92,9 +95,12 @@ enum Transport {
     }
 
     private static func execute(_ request: URLRequest, stage: String, retry: Bool) async throws -> JSON {
-        let attempts = retry ? 2 : 1
-        var lastError: APIError = .network(stage)
-        for attempt in 0..<attempts {
+        // 读请求多给两次机会：冷启动阶段的失败几乎都是网络栈没就绪，
+        // 等半秒重试一次通常就通了，不该直接把它当错误抛给界面。
+        let attempts = retry ? 3 : 1
+        var attempt = 0
+        while true {
+            attempt += 1
             do {
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else {
@@ -106,6 +112,7 @@ enum Transport {
                 let result = JSONValue.dict(json["result"])
                 let code = JSONValue.text(result["resultCode"]) ?? "unknown"
                 if http.statusCode >= 400 || code != "000000" {
+                    // 业务错误不重试：同一条请求重发结果一样，只会拖慢界面。
                     throw APIError.provider(stage: stage, status: http.statusCode, code: code,
                                             detail: JSONValue.text(result["resultMsg"]))
                 }
@@ -113,12 +120,11 @@ enum Transport {
             } catch let error as APIError {
                 throw error
             } catch {
-                lastError = .network(stage)
-                if attempt == attempts - 1 { break }
-                try? await Task.sleep(nanoseconds: 250_000_000)
+                if attempt >= attempts { throw APIError.network(stage) }
+                let delay = attempt == 1 ? 500 : 1_400
+                try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
             }
         }
-        throw lastError
     }
 
     /// 有界文本下载（歌词资源），超过 512KB 直接放弃，避免把大文件读进内存。

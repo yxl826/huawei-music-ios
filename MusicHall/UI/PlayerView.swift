@@ -359,9 +359,9 @@ private struct LyricsSection: View {
     private func sync() {
         let index = LyricsParser.activeIndex(lines, positionMs: clock.position * 1000)
         guard index != activeIndex else { return }
-        withAnimation(.easeOut(duration: 0.3)) {
-            activeIndex = index
-        }
+        // 不在这里统一开动画：行的字号/模糊由各行自己的弹簧驱动，
+        // 容器滚动另有更松的弹簧，两者分开才有 Apple Music 那种「弹一下」的手感。
+        activeIndex = index
     }
 }
 
@@ -447,7 +447,7 @@ private struct LyricsPane: View {
             )
             .onChange(of: activeIndex) { value in
                 guard value >= 0, Date() >= manualScrollingUntil else { return }
-                withAnimation(.spring(response: 0.52, dampingFraction: 0.86)) {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
                     proxy.scrollTo(value, anchor: .center)
                 }
             }
@@ -465,9 +465,10 @@ private struct LyricsPane: View {
         let distance = activeIndex >= 0 ? abs(index - activeIndex) : 99
 
         // Apple Music 的做法：当前行清晰加粗，上下相邻的行按距离递增高斯模糊、同时变淡，
-        // 切行时整体做一次过渡，看起来像焦点在歌词上移动。
+        // 再叠一点缩放与回弹，切行时焦点像被「吸」到新的一行上。
         let opacity: Double = isActive ? 1 : max(0.14, 0.62 - Double(distance) * 0.10)
         let blur: CGFloat = isActive ? 0 : min(4.5, CGFloat(distance) * 0.9)
+        let scale: CGFloat = isActive ? 1 : 0.97
 
         return VStack(alignment: .leading, spacing: 4) {
             Text(line.text)
@@ -487,6 +488,10 @@ private struct LyricsPane: View {
             }
         }
         .frame(width: rowWidth, alignment: .leading)
+        // 以左边为锚点缩放：左对齐的歌词不会因为放大而整体右移。
+        .scaleEffect(scale, anchor: .leading)
+        // 阻尼略小于 1，收尾会轻轻过冲一下——这就是「Q弹」的来源。
+        .animation(.spring(response: 0.42, dampingFraction: 0.66), value: activeIndex)
         .id(index)
         .contentShape(Rectangle())
         .onTapGesture {

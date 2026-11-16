@@ -12,6 +12,8 @@ struct HallView: View {
     @State private var picks: [Track] = []
     @State private var isLoading = false
     @State private var loadedOnce = false
+    @State private var retriedAfterColdStart = false
+    @State private var showedLoadError = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -135,6 +137,14 @@ struct HallView: View {
         picks = Array(favorites.shuffled().prefix(6))
     }
 
+    private func fetchPlaylists() async -> PagedPlaylists? {
+        try? await MusicAPI.shared.discoverPlaylists()
+    }
+
+    private func fetchFavorites() async -> (entries: [JSON], tracks: [Track], hasMore: Bool)? {
+        try? await MusicAPI.shared.favorites(start: 0, limit: 50)
+    }
+
     private func load() async {
         guard session.isAuthenticated else {
             playlists = []
@@ -148,16 +158,30 @@ struct HallView: View {
             isLoading = false
             loadedOnce = true
         }
-        do {
-            async let discovered = MusicAPI.shared.discoverPlaylists()
-            async let favoritesPage = MusicAPI.shared.favorites(start: 0, limit: 50)
-            let (list, page) = try await (discovered, favoritesPage)
-            playlists = list.playlists
+        // 歌单和收藏分别看待成败：冷启动时一个请求抖动不该把整页清空。
+        async let discoveredTask = fetchPlaylists()
+        async let favoritesTask = fetchFavorites()
+        let list = await discoveredTask
+        let page = await favoritesTask
+
+        if let list { playlists = list.playlists }
+        if let page {
             favorites = page.tracks
             shufflePicks()
-        } catch {
-            if !loadedOnce {
-                toast.show(error.readableMessage)
+        }
+
+        if list == nil || page == nil {
+            if !retriedAfterColdStart {
+                retriedAfterColdStart = true
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    await load()
+                }
+                return
+            }
+            if playlists.isEmpty, favorites.isEmpty, !showedLoadError {
+                showedLoadError = true
+                toast.show("内容没加载出来，下拉可以再试一次。")
             }
         }
     }
