@@ -16,16 +16,41 @@ targets:
     platform: iOS
     sources:
       - path: MusicHall
+      # Live Activity 的状态定义要同时编进 App 和 Widget 扩展。
+      - path: Shared
+    dependencies:
+      - target: MusicHallWidget
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.unofficial.musichall
         PRODUCT_NAME: MusicHall
-        MARKETING_VERSION: "1.6.5"
-        CURRENT_PROJECT_VERSION: "26"
+        MARKETING_VERSION: "1.6.6"
+        CURRENT_PROJECT_VERSION: "27"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Config/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_EMIT_LOC_STRINGS: YES
+  MusicHallWidget:
+    type: app-extension
+    platform: iOS
+    # Live Activity 的 API 从 16.1 才有；扩展单独抬到 16.1，App 仍然支持 16.0。
+    deploymentTarget: "16.1"
+    sources:
+      - path: MusicHallWidget
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.unofficial.musichall.widget
+        PRODUCT_NAME: MusicHallWidget
+        MARKETING_VERSION: "1.6.6"
+        CURRENT_PROJECT_VERSION: "27"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: MusicHallWidget/Info.plist
+        SKIP_INSTALL: YES
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
         SWIFT_EMIT_LOC_STRINGS: YES
@@ -34,6 +59,7 @@ schemes:
     build:
       targets:
         MusicHall: all
+        MusicHallWidget: all
     run:
       config: Debug
     archive:

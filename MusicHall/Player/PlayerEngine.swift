@@ -2,6 +2,9 @@ import AVFoundation
 import Combine
 import MediaPlayer
 import UIKit
+#if canImport(ActivityKit)
+import ActivityKit
+#endif
 
 /// 只有播放进度。单独成对象，是为了让「每秒两次」的更新不影响其它视图。
 @MainActor
@@ -123,6 +126,13 @@ final class PlayerEngine: ObservableObject {
     private var tickCount = 0
     private var lastTickSeconds: Double = 0
     private var cachedArtwork: (url: String, artwork: MPMediaItemArtwork)?
+    /// 锁屏 / 通知中心的歌词卡片。系统的播控组件只画固定的那几个字段，
+    /// 歌词只能用 Live Activity 送出去（见 Shared/LyricsActivityAttributes.swift）。
+    @available(iOS 16.1, *)
+    private var lyricsActivity: Activity<LyricsActivityAttributes>?
+    /// 上次下发给卡片的那一句和播放状态：只在这两个变了的时候才更新。
+    private var activityLine = -1
+    private var activityPlaying = false
     private var persistTask: Task<Void, Never>?
     private let queueStorageKey = "saved-queue-v1"
 
@@ -132,6 +142,14 @@ final class PlayerEngine: ObservableObject {
         addTimeObserver()
         addNotifications()
         setupRemoteCommands()
+        // 进程被杀掉时 Live Activity 可能还挂在锁屏上，启动先清掉。
+        if #available(iOS 16.2, *) {
+            Task { @MainActor in
+                for activity in Activity<LyricsActivityAttributes>.activities {
+                    await activity.end(nil, dismissalPolicy: .immediate)
+                }
+            }
+        }
     }
 
     // MARK: - 生命周期
@@ -308,6 +326,7 @@ final class PlayerEngine: ObservableObject {
             applyPendingSeekIfNeeded()
         }
         updateNowPlaying()
+        refreshLyricsActivity(force: true)
     }
 
     func resume() {
@@ -397,6 +416,7 @@ final class PlayerEngine: ObservableObject {
     func clear() {
         player.pause()
         player.replaceCurrentItem(with: nil)
+        endLyricsActivity()
         queue = []
         index = -1
         isPlaying = false
@@ -454,6 +474,7 @@ final class PlayerEngine: ObservableObject {
         hasReported = false
         lastTickSeconds = 0
         lyrics = .empty
+        endLyricsActivity()
         isFavorite = false
         isBuffering = true
         clock.set(0)
@@ -636,6 +657,8 @@ final class PlayerEngine: ObservableObject {
         tickCount += 1
         // 锁屏信息不必每两秒重写一次：MPNowPlayingInfoCenter 每次写入都会触发系统侧刷新。
         if tickCount % 10 == 0 { updateNowPlaying() }
+        // 换句才真正下发，卡片上的歌词才跟得上唱到哪儿。
+        refreshLyricsActivity()
         // 5 秒落一次盘：杀后台时最多丢 5 秒，恢复的进度更贴近真实位置。
         if tickCount % 20 == 0 { persistQueueSoon() }
     }
@@ -729,6 +752,58 @@ final class PlayerEngine: ObservableObject {
         let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
         cachedArtwork = (cover, artwork)
         return artwork
+    }
+
+    // MARK: - 锁屏歌词（Live Activity）
+
+    /// 把当前这一句同步到锁屏 / 通知中心的卡片。
+    ///
+    /// 只在「换句」或「播放状态变了」时才下发：这个回调每 0.25 秒跑一次，
+    /// 每次都推一遍既没意义，也会被系统限流、白耗电。
+    private func refreshLyricsActivity(force: Bool = false) {
+        guard #available(iOS 16.2, *) else { return }
+        guard let track = current else { return }
+        // 暂停着又没有卡片时不做任何事，别在冷启动恢复时凭空弹一块出来。
+        guard isPlaying || lyricsActivity != nil else { return }
+
+        let lines = lyrics.lines
+        let index = lines.isEmpty ? -1 : LyricsParser.activeIndex(lines: lines, positionMs: lyricTime() * 1000)
+        let currentLine = (index >= 0 && index < lines.count) ? lines[index].text : (lines.first?.text ?? "")
+        guard force || index != activityLine || isPlaying != activityPlaying else { return }
+        activityLine = index
+        activityPlaying = isPlaying
+
+        let next = (index >= 0 && index + 1 < lines.count) ? lines[index + 1].text : nil
+        let state = LyricsActivityAttributes.ContentState(
+            title: track.title,
+            artist: track.artistLine,
+            currentLine: currentLine,
+            nextLine: (next?.isEmpty == false) ? next : nil,
+            isPlaying: isPlaying,
+            position: clock.position,
+            duration: duration
+        )
+        let content = ActivityContent(state: state, staleDate: nil)
+
+        if let activity = lyricsActivity {
+            Task { await activity.update(content) }
+            return
+        }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        lyricsActivity = try? Activity.request(
+            attributes: LyricsActivityAttributes(trackId: track.id),
+            content: content,
+            pushType: nil
+        )
+    }
+
+    private func endLyricsActivity() {
+        guard #available(iOS 16.2, *) else { return }
+        activityLine = -1
+        activityPlaying = false
+        guard let activity = lyricsActivity else { return }
+        lyricsActivity = nil
+        Task { await activity.end(nil, dismissalPolicy: .immediate) }
     }
 
     private func updateNowPlaying() {
