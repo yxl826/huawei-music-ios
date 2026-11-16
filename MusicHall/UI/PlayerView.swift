@@ -35,7 +35,7 @@ struct PlayerView: View {
             // 参考 Apple 文档《Adding a background to your view》里「Extend the background into the safe areas」。
             ArtworkBackdrop(url: player.current?.coverUrl)
                 // 往下拽着收起时背景跟着暗一点，手上才有「在把它推走」的实感。
-                .opacity(1 - min(0.35, max(0, dragOffset) / 480))
+                .opacity(backdropOpacity)
 
             // 宽度直接取窗口宽度并钉死：不经过 GeometryReader 的提案，
             // 就没有「子视图撑宽容器 → 拿到偏大的宽度 → 整页居中裁掉」这条链。
@@ -97,6 +97,13 @@ struct PlayerView: View {
         }
         .padding(.horizontal, sidePadding)
         .frame(width: width)
+    }
+
+    /// 下拉时的背景亮度：最多压到 65%，不会再暗下去。
+    private var backdropOpacity: Double {
+        let pulled: CGFloat = max(0, dragOffset) / 480
+        let factor: CGFloat = 1 - min(CGFloat(0.35), pulled)
+        return Double(max(0.2, factor))
     }
 
     private var grabber: some View {
