@@ -176,39 +176,72 @@ struct ScrubBar: View {
     var onSeek: (Double) -> Void
 
     @State private var dragging: Double?
+    /// 上次触发触感时的进度格（按 1% 取整），避免拖动时每一帧都震一下。
+    @State private var lastTick: Int = -1
+
+    private var isDragging: Bool { dragging != nil }
 
     var body: some View {
         GeometryReader { geometry in
             let width = max(geometry.size.width, 1)
             let fraction = min(1, max(0, dragging ?? value))
+            let knob: CGFloat = isDragging ? 15 : 9
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.white.opacity(0.14))
-                    .frame(height: 3)
+                    .frame(height: isDragging ? 4 : 3)
                 Capsule()
                     .fill(Theme.text)
-                    .frame(width: width * fraction, height: 3)
+                    .frame(width: width * fraction, height: isDragging ? 4 : 3)
                 Circle()
                     .fill(Theme.text)
-                    .frame(width: dragging == nil ? 9 : 15, height: dragging == nil ? 9 : 15)
-                    .offset(x: max(0, width * fraction - (dragging == nil ? 4.5 : 7.5)))
+                    .frame(width: knob, height: knob)
+                    // 拖起来的一瞬间圆点会「弹」出来，而不是直接换尺寸。
+                    .shadow(color: .black.opacity(isDragging ? 0.35 : 0), radius: isDragging ? 6 : 0)
+                    .offset(x: max(0, width * fraction - knob / 2))
             }
             .frame(maxHeight: .infinity, alignment: .center)
+            .animation(.spring(response: 0.26, dampingFraction: 0.8), value: isDragging)
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { gesture in
-                        dragging = min(1, max(0, gesture.location.x / width))
+                        let target = min(1, max(0, gesture.location.x / width))
+                        if dragging == nil {
+                            Haptics.tick()
+                            lastTick = Int(target * 100)
+                        } else {
+                            // 每滑过 1% 给一次轻微的「咔」，手感像在拨刻度。
+                            let tick = Int(target * 100)
+                            if tick != lastTick {
+                                lastTick = tick
+                                Haptics.tick()
+                            }
+                        }
+                        dragging = target
                     }
                     .onEnded { _ in
                         if let target = dragging {
                             onSeek(target)
+                            Haptics.thump()
                         }
                         dragging = nil
+                        lastTick = -1
                     }
             )
         }
         .frame(height: 24)
+    }
+}
+
+/// 按下时轻微缩一下：比只有透明度变化更像「按到了实体按钮」。
+struct PressableButtonStyle: ButtonStyle {
+    var scale: CGFloat = 0.94
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .animation(.spring(response: 0.24, dampingFraction: 0.72), value: configuration.isPressed)
     }
 }
 

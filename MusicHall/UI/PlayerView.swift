@@ -13,6 +13,7 @@ struct PlayerView: View {
     @EnvironmentObject private var player: PlayerEngine
     @EnvironmentObject private var nav: NavState
     @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var toast: ToastCenter
 
     @State private var page: Page = .lyrics
     @State private var showLyricSync = false
@@ -33,6 +34,8 @@ struct PlayerView: View {
             // `.frame(...)+.clipped()`，等于又把它收回安全区，于是上下各留一条黑边。
             // 参考 Apple 文档《Adding a background to your view》里「Extend the background into the safe areas」。
             ArtworkBackdrop(url: player.current?.coverUrl)
+                // 往下拽着收起时背景跟着暗一点，手上才有「在把它推走」的实感。
+                .opacity(1 - min(0.35, max(0, dragOffset) / 480))
 
             // 宽度直接取窗口宽度并钉死：不经过 GeometryReader 的提案，
             // 就没有「子视图撑宽容器 → 拿到偏大的宽度 → 整页居中裁掉」这条链。
@@ -147,6 +150,7 @@ struct PlayerView: View {
             Spacer(minLength: 8)
 
             Button {
+                Haptics.tap()
                 player.toggleFavorite()
             } label: {
                 Image(systemName: player.isFavorite ? "star.fill" : "star")
@@ -158,6 +162,7 @@ struct PlayerView: View {
             .buttonStyle(.plain)
 
             Button {
+                Haptics.tap()
                 dismiss()
             } label: {
                 Image(systemName: "chevron.down")
@@ -280,6 +285,7 @@ struct PlayerView: View {
                     }
 
                     Button {
+                        Haptics.tap()
                         toggleLanguageMenu(!showLanguageMenu)
                     } label: {
                         Image(systemName: "character.bubble")
@@ -328,6 +334,7 @@ struct PlayerView: View {
     private var transportRow: some View {
         HStack(spacing: 0) {
             Button {
+                Haptics.thump()
                 player.previous()
             } label: {
                 Image(systemName: "backward.fill")
@@ -336,11 +343,12 @@ struct PlayerView: View {
                     .frame(width: 64, height: 56)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle(scale: 0.88))
 
             Spacer(minLength: 0)
 
             Button {
+                Haptics.thump()
                 player.togglePlayPause()
             } label: {
                 ZStack {
@@ -356,11 +364,12 @@ struct PlayerView: View {
                 }
                 .frame(width: 58, height: 58)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle(scale: 0.92))
 
             Spacer(minLength: 0)
 
             Button {
+                Haptics.thump()
                 player.next()
             } label: {
                 Image(systemName: "forward.fill")
@@ -369,7 +378,7 @@ struct PlayerView: View {
                     .frame(width: 64, height: 56)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableButtonStyle(scale: 0.88))
         }
         .padding(.horizontal, 6)
     }
@@ -380,6 +389,8 @@ struct PlayerView: View {
         HStack {
             iconButton(player.mode.symbol) {
                 player.cycleMode()
+                // 图标换来换去不容易看出切到了哪个模式，顺手报一下。
+                toast.show(player.mode.label)
             }
             Spacer(minLength: 0)
             iconButton(page == .lyrics ? "photo" : "quote.bubble") {
@@ -401,7 +412,10 @@ struct PlayerView: View {
     }
 
     private func iconButton(_ symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(Color.white.opacity(0.62))
@@ -472,6 +486,8 @@ private struct ProgressSection: View {
                 Text("-" + Self.label(max(0, player.duration - clock.position)))
             }
             .font(.system(size: 11, weight: .medium, design: .rounded))
+            // 等宽数字：不然秒数个位跳动时整行宽度会一抖一抖。
+            .monospacedDigit()
             .foregroundStyle(Color.white.opacity(0.45))
         }
     }
@@ -555,11 +571,12 @@ private struct LyricsPane: View {
     }
 
     private func markManualScrolling() {
-        manualScrollingUntil = Date().addingTimeInterval(2.5)
+        // 1.7 秒足够读完两行；原来 2.5 秒会让人觉得「歌词不跟了」。
+        manualScrollingUntil = Date().addingTimeInterval(1.7)
         if !isManualScrolling { isManualScrolling = true }
         settleTask?.cancel()
         settleTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            try? await Task.sleep(nanoseconds: 1_700_000_000)
             guard !Task.isCancelled else { return }
             isManualScrolling = false
         }
@@ -633,6 +650,7 @@ private struct LyricsPane: View {
         .contentShape(Rectangle())
         .onTapGesture {
             guard let timeMs = line.timeMs else { return }
+            Haptics.tap()
             player.seek(to: timeMs / 1000)
             if !player.isPlaying { player.togglePlayPause() }
         }

@@ -62,6 +62,7 @@ struct MiniPlayerCard: View {
                 }
                 Spacer(minLength: 6)
                 Button {
+                    Haptics.thump()
                     player.togglePlayPause()
                 } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
@@ -72,6 +73,7 @@ struct MiniPlayerCard: View {
                 }
                 .buttonStyle(.plain)
                 Button {
+                    Haptics.tap()
                     player.next()
                 } label: {
                     Image(systemName: "forward.fill")
@@ -119,6 +121,7 @@ struct MiniPlayerAccessory: View {
                 }
                 Spacer(minLength: 6)
                 Button {
+                    Haptics.thump()
                     player.togglePlayPause()
                 } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
@@ -129,6 +132,7 @@ struct MiniPlayerAccessory: View {
                 }
                 .buttonStyle(.plain)
                 Button {
+                    Haptics.tap()
                     player.next()
                 } label: {
                     Image(systemName: "forward.fill")
@@ -184,7 +188,10 @@ struct TopActionBar: View {
     }
 
     private func button(_ symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.text.opacity(0.92))
